@@ -29,7 +29,7 @@ http://localhost:3000/api/v1
 Production:
 
 ```text
-https://herzen-co-operational-control.vercel.app/api/v1
+https://operations.herzenco.co/api/v1
 ```
 
 ## Authenticate
