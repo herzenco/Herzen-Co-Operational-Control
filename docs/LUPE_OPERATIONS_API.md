@@ -29,11 +29,8 @@ http://localhost:3000/api/v1
 Production:
 
 ```text
-https://herzen-agent-operations.herzen150848.chatgpt.site/api/v1
+https://herzen-co-operational-control.vercel.app/api/v1
 ```
-
-The production API becomes available after the pending site access and
-deployment decision is completed.
 
 ## Authenticate
 
