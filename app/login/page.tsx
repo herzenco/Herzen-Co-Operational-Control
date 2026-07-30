@@ -34,8 +34,9 @@ export default async function LoginPage({
 
           {error && (
             <div className="loginError" role="alert">
-              We couldn&apos;t verify those credentials. Try again or contact your
-              Herzen Co. administrator.
+              {error === "confirmation"
+                ? "Verify your company email before signing in. We sent a new confirmation message to your inbox."
+                : "We couldn’t verify those credentials. Try again or contact your Herzen Co. administrator."}
             </div>
           )}
 

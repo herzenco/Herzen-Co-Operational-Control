@@ -19,7 +19,8 @@ export async function POST(request: Request) {
   const { error } = await supabase.auth.signInWithPassword({ email, password });
 
   if (error) {
-    return NextResponse.redirect(new URL("/login?error=credentials", request.url), 303);
+    const reason = error.code === "email_not_confirmed" ? "confirmation" : "credentials";
+    return NextResponse.redirect(new URL(`/login?error=${reason}`, request.url), 303);
   }
 
   return NextResponse.redirect(new URL("/", request.url), 303);
