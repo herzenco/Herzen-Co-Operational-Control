@@ -14,7 +14,7 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     title: "Lupe — Herzen Co. Operations",
     description: "Agent operations, instructions, approvals, and daily updates for Herzen Co.",
-    icons: { icon: "/favicon.svg", shortcut: "/favicon.svg" },
+    icons: { icon: "/herzen-icon.png", shortcut: "/herzen-icon.png", apple: "/herzen-icon.png" },
     openGraph: {
       title: "Herzen Co. Agent Operations",
       description: "Work in motion.",

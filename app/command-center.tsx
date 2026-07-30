@@ -29,11 +29,11 @@ type Task = {
 };
 
 const agents: Agent[] = [
-  { id: "lupe", name: "Lupe", role: "Main operator", code: "LU", color: "#bda27a", tint: "#f4ede2", status: "Coordinating today’s run" },
-  { id: "d8a", name: "D8-A", role: "Skydeo · product + technical ops", code: "D8", color: "#2d6b61", tint: "#e4efec", status: "2 priorities in progress" },
-  { id: "c3po", name: "C-3PO", role: "Social media + content calendar", code: "C3", color: "#b46b39", tint: "#f6e9df", status: "Calendar updated 18m ago" },
-  { id: "k2", name: "K2", role: "Research + optimization", code: "K2", color: "#5c6690", tint: "#e9eaf2", status: "1 package awaiting sign-off" },
-  { id: "rex", name: "Rex", role: "Paid media specialist", code: "RX", color: "#994c4c", tint: "#f3e5e5", status: "Campaign review at 2:00 PM" },
+  { id: "lupe", name: "Lupe", role: "Main operator", code: "LU", color: "#1C1813", tint: "#D6CAB6", status: "Coordinating today’s run" },
+  { id: "d8a", name: "D8-A", role: "Skydeo · product + technical ops", code: "D8", color: "#1C1813", tint: "#EBE3D5", status: "2 priorities in progress" },
+  { id: "c3po", name: "C-3PO", role: "Social media + content calendar", code: "C3", color: "#9C5C3E", tint: "#EFE7D9", status: "Calendar updated 18m ago" },
+  { id: "k2", name: "K2", role: "Research + optimization", code: "K2", color: "#3D3629", tint: "#D6CAB6", status: "1 package awaiting sign-off" },
+  { id: "rex", name: "Rex", role: "Paid media specialist", code: "RX", color: "#6E6455", tint: "#EBE3D5", status: "Campaign review at 2:00 PM" },
 ];
 
 const initialTasks: Task[] = [
@@ -95,18 +95,18 @@ export function CommandCenter() {
     <div className="appShell">
       <aside className="sidebar">
         <div className="brand">
-          <div className="brandMark">H</div>
-          <div><b>HERZEN CO.</b><span>OPERATIONS</span></div>
+          <img className="brandLogo" src="/herzen-logo-black.png" alt="Herzen Co." />
+          <span className="brandDivision">OPERATIONS</span>
         </div>
 
         <nav className="nav">
-          <button className="navItem active"><span>⌘</span> Command center</button>
-          <button className="navItem" onClick={() => setView("List")}><span>☷</span> All work <em>{tasks.length}</em></button>
-          <button className="navItem" onClick={() => setBriefOpen(true)}><span>◫</span> Daily brief</button>
-          <button className="navItem"><span>⌁</span> Approval queue <em>2</em></button>
+          <button className="navItem active"><span>01</span> Command center</button>
+          <button className="navItem" onClick={() => setView("List")}><span>02</span> All work <em>{tasks.length}</em></button>
+          <button className="navItem" onClick={() => setBriefOpen(true)}><span>03</span> Daily brief</button>
+          <button className="navItem"><span>04</span> Approval queue <em>2</em></button>
         </nav>
 
-        <div className="sideLabel">AGENT SPACES <button aria-label="Add agent">＋</button></div>
+        <div className="sideLabel">AGENT SPACES <button aria-label="Add agent">Add</button></div>
         <div className="agentNav">
           {agents.map(agent => (
             <button key={agent.id} className={selectedAgent === agent.id ? "selected" : ""} onClick={() => { setSelectedAgent(agent.id); setSpaceOpen(agent.id); }}>
@@ -120,22 +120,22 @@ export function CommandCenter() {
           <button className="helpButton">?</button>
           <div className="userAvatar">TV</div>
           <div><b>Tito Valenzuela</b><span>Administrator</span></div>
-          <button className="more">•••</button>
+          <button className="more">More</button>
         </div>
       </aside>
 
       <main>
         <header className="topbar">
-          <div className="mobileBrand">H</div>
-          <label className="search"><span>⌕</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search work, agents, projects..." /><kbd>⌘ K</kbd></label>
-          <div className="topActions"><button className="iconButton">◔</button><button className="iconButton notification">♢<i /></button><button className="avatar user">TV</button></div>
+          <div className="mobileBrand"><img src="/herzen-mark-white.png" alt="" /></div>
+          <label className="search"><span>SEARCH</span><input value={search} onChange={e => setSearch(e.target.value)} placeholder="Work, agents, projects..." /><kbd>⌘ K</kbd></label>
+          <div className="topActions"><button className="iconButton">Theme</button><button className="iconButton notification">Alerts<i /></button><button className="avatar user">TV</button></div>
         </header>
 
         <section className="content">
           <div className="eyebrow">THURSDAY, JULY 30</div>
           <div className="headingRow">
             <div><h1>Good morning, Tito.</h1><p>Here’s what your agents are moving forward today.</p></div>
-            <div className="headingActions"><button className="secondary" onClick={() => setBriefOpen(true)}>◫ Daily update</button><button className="primary" onClick={() => setNewTaskOpen(true)}>＋ New instruction</button></div>
+            <div className="headingActions"><button className="secondary" onClick={() => setBriefOpen(true)}>Daily update</button><button className="primary" onClick={() => setNewTaskOpen(true)}>New instruction</button></div>
           </div>
 
           <div className="summaryGrid">
@@ -161,8 +161,8 @@ export function CommandCenter() {
             <div className="workHeader">
               <div><h2>{selectedAgent === "all" ? "Work in motion" : `${agents.find(a => a.id === selectedAgent)?.name}’s work`}</h2><span>{filtered.filter(t => t.status !== "Done").length} active items across the team</span></div>
               <div className="workControls">
-                <button className={`filterPill ${selectedAgent !== "all" ? "on" : ""}`} onClick={() => setSelectedAgent("all")}>⌑ {selectedAgent === "all" ? "Filter" : "Clear agent"} <b>{selectedAgent !== "all" ? 1 : ""}</b></button>
-                <div className="viewSwitch">{(["List", "Board", "Calendar"] as View[]).map(v => <button key={v} className={view === v ? "active" : ""} onClick={() => setView(v)}>{v === "List" ? "☷" : v === "Board" ? "▦" : "□"} <span>{v}</span></button>)}</div>
+                <button className={`filterPill ${selectedAgent !== "all" ? "on" : ""}`} onClick={() => setSelectedAgent("all")}>{selectedAgent === "all" ? "Filter" : "Clear agent"} <b>{selectedAgent !== "all" ? 1 : ""}</b></button>
+                <div className="viewSwitch">{(["List", "Board", "Calendar"] as View[]).map(v => <button key={v} className={view === v ? "active" : ""} onClick={() => setView(v)}><span>{v}</span></button>)}</div>
               </div>
             </div>
 
@@ -170,25 +170,25 @@ export function CommandCenter() {
               <div className="tableHead"><span>TASK</span><span>OWNER</span><span>STATUS</span><span>PRIORITY</span><span>DUE</span><span /></div>
               {filtered.map(task => { const agent = agents.find(a => a.id === task.agent)!; return (
                 <div className="taskRow" key={task.id}>
-                  <div className="taskTitle"><button onClick={() => updateTask(task.id, task.status === "Done" ? "Inbox" : "Done")} className={`check ${task.status === "Done" ? "checked" : ""}`}>{task.status === "Done" ? "✓" : ""}</button><span><b>{task.title}</b><small>{task.project}</small></span></div>
+                  <div className="taskTitle"><button aria-label={task.status === "Done" ? "Mark incomplete" : "Mark complete"} onClick={() => updateTask(task.id, task.status === "Done" ? "Inbox" : "Done")} className={`check ${task.status === "Done" ? "checked" : ""}`}><i /></button><span><b>{task.title}</b><small>{task.project}</small></span></div>
                   <div className="owner"><Avatar agent={agent} small /><span>{agent.name}</span></div>
                   <button className={`status status${task.status.replace(" ", "")}`} onClick={() => updateTask(task.id, statusOrder[(statusOrder.indexOf(task.status) + 1) % statusOrder.length])}><i />{task.status}</button>
                   <span className={`priority ${task.priority.toLowerCase()}`}>{task.priority}</span>
                   <span className={task.due === "Today" ? "dueToday" : "due"}>{task.due}</span>
-                  <button className="rowMore">•••</button>
+                  <button className="rowMore">More</button>
                 </div>
               ); })}
             </div>}
 
             {view === "Board" && <div className="boardView">
               {statusOrder.map(status => <div className="boardColumn" key={status}>
-                <div className="columnHead"><span><i className={`columnDot ${status.replace(" ", "")}`} />{status}</span><b>{filtered.filter(t => t.status === status).length}</b><button>＋</button></div>
+                <div className="columnHead"><span><i className={`columnDot ${status.replace(" ", "")}`} />{status}</span><b>{filtered.filter(t => t.status === status).length}</b><button>Add</button></div>
                 {filtered.filter(t => t.status === status).map(task => { const agent = agents.find(a => a.id === task.agent)!; return <article className="boardCard" key={task.id}>
                   <span className="projectLabel">{task.project}</span><h3>{task.title}</h3>{task.note && <p>{task.note}</p>}
                   <div><Avatar agent={agent} small /><span className={`priority ${task.priority.toLowerCase()}`}>{task.priority}</span><small>{task.due}</small></div>
                   <button aria-label="Move task forward" onClick={() => updateTask(task.id, statusOrder[(statusOrder.indexOf(task.status) + 1) % statusOrder.length])}>→</button>
                 </article>; })}
-                <button className="addCard" onClick={() => setNewTaskOpen(true)}>＋ Add instruction</button>
+                <button className="addCard" onClick={() => setNewTaskOpen(true)}>Add instruction</button>
               </div>)}
             </div>}
 
@@ -227,7 +227,7 @@ export function CommandCenter() {
         <section className="focusCard"><small>CURRENT FOCUS</small><h3>{tasks.find(t => t.agent === activeAgent.id && t.status === "In progress")?.title || "Ready for new instruction"}</h3><p>{activeAgent.status}</p><div className="progress"><i style={{ width: activeAgent.id === "lupe" ? "72%" : "58%" }} /></div></section>
         <h3 className="sectionTitle">Open work</h3>
         {tasks.filter(t => t.agent === activeAgent.id && t.status !== "Done").map(t => <button className="spaceTask" key={t.id}><span className={`priority ${t.priority.toLowerCase()}`}>{t.priority}</span><b>{t.title}</b><small>{t.status} · {t.due}</small></button>)}
-        <button className="primary full" onClick={() => { setSpaceOpen(null); setNewTaskOpen(true); }}>＋ Send {activeAgent.name} an instruction</button>
+        <button className="primary full" onClick={() => { setSpaceOpen(null); setNewTaskOpen(true); }}>Send {activeAgent.name} an instruction</button>
       </aside></div>}
     </div>
   );
