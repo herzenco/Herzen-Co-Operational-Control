@@ -32,7 +32,25 @@ export async function updateSession(request: NextRequest) {
   );
 
   // Validates the JWT and refreshes expired credentials when necessary.
-  await supabase.auth.getClaims();
+  const { data } = await supabase.auth.getClaims();
+  const isAuthenticated = Boolean(data?.claims);
+  const isLoginRoute =
+    request.nextUrl.pathname === "/login" ||
+    request.nextUrl.pathname === "/api/auth/login";
+
+  if (!isAuthenticated && !isLoginRoute) {
+    const loginUrl = request.nextUrl.clone();
+    loginUrl.pathname = "/login";
+    loginUrl.search = "";
+    return NextResponse.redirect(loginUrl);
+  }
+
+  if (isAuthenticated && request.nextUrl.pathname === "/login") {
+    const homeUrl = request.nextUrl.clone();
+    homeUrl.pathname = "/";
+    homeUrl.search = "";
+    return NextResponse.redirect(homeUrl);
+  }
 
   return supabaseResponse;
 }

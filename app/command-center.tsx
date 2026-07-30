@@ -107,6 +107,9 @@ export function CommandCenter() {
         <div className="railLabel">Roster</div>
         {agents.map(a => <button key={a.id} onClick={() => setDrawer(a.id)}><AgentMark id={a.id} /><span>{a.name}</span><i className={a.reported ? "online" : ""} /></button>)}
         <p>Operator on duty<br /><b>Lupe</b></p>
+        <form action="/api/auth/logout" method="post">
+          <button className="signOut" type="submit">Sign out</button>
+        </form>
       </div>
     </aside>
 
