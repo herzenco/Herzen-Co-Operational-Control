@@ -64,8 +64,8 @@ export default async function LoginPage({
           </form>
 
           <small className="loginHelp">
-            Access is limited to approved Herzen Co. accounts. There is no public
-            registration.
+            Access is limited to approved @herzen.co accounts. There is no
+            public registration.
           </small>
         </div>
       </section>
