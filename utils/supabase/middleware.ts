@@ -37,6 +37,15 @@ export async function updateSession(request: NextRequest) {
   const isLoginRoute =
     request.nextUrl.pathname === "/login" ||
     request.nextUrl.pathname === "/api/auth/login";
+  const isOperationsApi =
+    request.nextUrl.pathname === "/api/v1" ||
+    request.nextUrl.pathname.startsWith("/api/v1/");
+
+  // API v1 authenticates bearer tokens inside each route rather than with
+  // browser cookies, so it must bypass the human-login redirect.
+  if (isOperationsApi) {
+    return supabaseResponse;
+  }
 
   if (!isAuthenticated && !isLoginRoute) {
     const loginUrl = request.nextUrl.clone();
