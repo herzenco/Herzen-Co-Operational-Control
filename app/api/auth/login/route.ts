@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "../../../../utils/supabase/server";
 
-const COMPANY_EMAIL_DOMAIN = "herzen.co";
+const COMPANY_EMAIL_DOMAIN = "herzenco.co";
 
 export async function POST(request: Request) {
   const formData = await request.formData();

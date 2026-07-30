@@ -46,7 +46,7 @@ export default async function LoginPage({
                 name="email"
                 type="email"
                 autoComplete="email"
-                placeholder="name@herzen.co"
+                placeholder="name@herzenco.co"
                 required
               />
             </label>
@@ -64,7 +64,7 @@ export default async function LoginPage({
           </form>
 
           <small className="loginHelp">
-            Access is limited to approved @herzen.co accounts. There is no
+            Access is limited to approved @herzenco.co accounts. There is no
             public registration.
           </small>
         </div>
