@@ -15,6 +15,8 @@ export default async function LoginPage({
   return (
     <main className="companyLogin">
       <section className="loginBrand">
+        {/* Vinext's dev runtime does not currently support next/image reliably. */}
+        {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/herzen-logo-white.png" alt="Herzen Co." />
         <div>
           <span>Operations Control Center</span>

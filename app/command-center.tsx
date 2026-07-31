@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
+import { WorkflowDesigner } from "./workflows/workflow-designer";
 
-type View = "command" | "kanban" | "list" | "worklogs" | "content" | "approvals";
+type View = "command" | "kanban" | "list" | "worklogs" | "content" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
 
 type Viewer = {
@@ -52,6 +53,11 @@ type ContentForm = {
   failure_message: string;
 };
 
+type AgentForm = { code: string; name: string; role: string; lane: string; status: string; charter: string; instructions: string; capabilities: string };
+type WorkLogForm = { agent_id: string; task_id: string; entry_type: string; title: string; body: string; artifacts: string };
+type DailyUpdateForm = { agent_id: string; update_date: string; summary: string; completed: string; blockers: string; next_steps: string; asks: string; health: string };
+type LeadForm = { property_id: string; assigned_agent_id: string; contact_name: string; company: string; email: string; phone: string; source: string; subject: string; inquiry: string; status: string; priority: string; next_follow_up_at: string; notes: string };
+
 const EMPTY_FORM: TaskForm = {
   title: "",
   description: "",
@@ -78,6 +84,11 @@ const EMPTY_CONTENT_FORM: ContentForm = {
   failure_message: "",
 };
 
+const EMPTY_AGENT_FORM: AgentForm = { code: "", name: "", role: "", lane: "", status: "active", charter: "", instructions: "", capabilities: "" };
+const EMPTY_WORK_LOG_FORM: WorkLogForm = { agent_id: "", task_id: "", entry_type: "progress", title: "", body: "", artifacts: "" };
+const EMPTY_DAILY_UPDATE_FORM: DailyUpdateForm = { agent_id: "", update_date: "", summary: "", completed: "", blockers: "", next_steps: "", asks: "", health: "on_track" };
+const EMPTY_LEAD_FORM: LeadForm = { property_id: "", assigned_agent_id: "", contact_name: "", company: "", email: "", phone: "", source: "website", subject: "", inquiry: "", status: "new", priority: "medium", next_follow_up_at: "", notes: "" };
+
 const CONTENT_STATUS_LABELS: Record<string, string> = {
   idea: "Idea",
   research_ready: "Research ready",
@@ -100,7 +111,9 @@ const VIEWS: Array<{ id: View; label: string }> = [
   { id: "list", label: "List" },
   { id: "worklogs", label: "Work Logs" },
   { id: "content", label: "Content" },
+  { id: "leads", label: "Leads" },
   { id: "approvals", label: "Approvals" },
+  { id: "workflows", label: "Workflows" },
 ];
 
 const STATUS_COLUMNS = [
@@ -158,11 +171,18 @@ export function CommandCenter() {
   const [contentAccount, setContentAccount] = useState("all");
   const [contentType, setContentType] = useState("all");
   const [todayLabel, setTodayLabel] = useState("Today");
-  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "content" | null>(null);
+  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
   const [selectedContent, setSelectedContent] = useState<RecordValue | null>(null);
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
   const [contentForm, setContentForm] = useState<ContentForm>(EMPTY_CONTENT_FORM);
+  const [agentForm, setAgentForm] = useState<AgentForm>(EMPTY_AGENT_FORM);
+  const [workLogForm, setWorkLogForm] = useState<WorkLogForm>(EMPTY_WORK_LOG_FORM);
+  const [dailyUpdateForm, setDailyUpdateForm] = useState<DailyUpdateForm>(EMPTY_DAILY_UPDATE_FORM);
+  const [leads, setLeads] = useState<RecordValue[]>([]);
+  const [selectedLead, setSelectedLead] = useState<RecordValue | null>(null);
+  const [leadForm, setLeadForm] = useState<LeadForm>(EMPTY_LEAD_FORM);
+  const [leadStatus, setLeadStatus] = useState("all");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [busy, startTransition] = useTransition();
@@ -235,6 +255,7 @@ export function CommandCenter() {
         channelsResponse,
         typesResponse,
         historyResponse,
+        leadsResponse,
       ] = await Promise.all([
         fetch("/api/v1/overview", { headers }),
         fetch("/api/v1/approvals?limit=200&offset=0", { headers }),
@@ -245,6 +266,7 @@ export function CommandCenter() {
         fetch("/api/v1/content-channels?limit=100&offset=0", { headers }),
         fetch("/api/v1/content-types?limit=100&offset=0", { headers }),
         fetch("/api/v1/content-status-history?limit=500&offset=0", { headers }),
+        fetch("/api/v1/leads?limit=500&offset=0", { headers }),
       ]);
       const [
         overviewPayload,
@@ -256,6 +278,7 @@ export function CommandCenter() {
         channelsPayload,
         typesPayload,
         historyPayload,
+        leadsPayload,
       ] = await Promise.all([
         overviewResponse.json(),
         approvalsResponse.json(),
@@ -266,6 +289,7 @@ export function CommandCenter() {
         channelsResponse.json(),
         typesResponse.json(),
         historyResponse.json(),
+        leadsResponse.json(),
       ]);
       if (!overviewResponse.ok) throw new Error(overviewPayload?.error?.message || "Could not load operations.");
       const contentResponses = [
@@ -295,6 +319,7 @@ export function CommandCenter() {
       setContentChannels(channelsPayload.data.items);
       setContentTypes(typesPayload.data.items);
       setContentHistory(historyPayload.data.items);
+      setLeads(leadsResponse.ok ? leadsPayload.data.items : []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load operations.");
     }
@@ -336,6 +361,82 @@ export function CommandCenter() {
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "Could not update the task.");
     }
+  }
+
+  function lineList(value: string) {
+    return value.split("\n").map((item) => item.trim()).filter(Boolean);
+  }
+
+  function businessDate() {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  }
+
+  function openAgentForm(agent?: RecordValue) {
+    setSelectedAgent(agent || null);
+    setAgentForm(agent ? { code: text(agent.code, ""), name: text(agent.name, ""), role: text(agent.role, ""), lane: text(agent.lane, ""), status: text(agent.status, "active"), charter: text(agent.charter, ""), instructions: text(agent.instructions, ""), capabilities: Array.isArray(agent.capabilities) ? agent.capabilities.join("\n") : text(agent.capabilities, "") } : EMPTY_AGENT_FORM);
+    setDrawer("agentForm");
+  }
+
+  async function saveAgent() {
+    if (!agentForm.code.trim() || !agentForm.name.trim()) return setError("Agent code and display name are required.");
+    try {
+      setError("");
+      const payload = { ...agentForm, code: agentForm.code.trim(), name: agentForm.name.trim(), capabilities: lineList(agentForm.capabilities) };
+      await request(selectedAgent ? `/api/v1/agents/${selectedAgent.id}` : "/api/v1/agents", { method: selectedAgent ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      setDrawer(null); setSelectedAgent(null); setAgentForm(EMPTY_AGENT_FORM);
+      if (session) await refreshAll(session.access_token);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not save the agent."); }
+  }
+
+  function openWorkLog(agentId = "", taskId = "") {
+    setWorkLogForm({ ...EMPTY_WORK_LOG_FORM, agent_id: agentId, task_id: taskId });
+    setDrawer("workLog");
+  }
+
+  async function saveWorkLog() {
+    if (!workLogForm.agent_id || !workLogForm.body.trim()) return setError("Choose an agent and document the work performed.");
+    try {
+      setError("");
+      await request("/api/v1/work-logs", { method: "POST", body: JSON.stringify({ ...workLogForm, task_id: workLogForm.task_id || null, title: workLogForm.title.trim() || null, body: workLogForm.body.trim(), artifacts: lineList(workLogForm.artifacts) }) });
+      setDrawer(null); setWorkLogForm(EMPTY_WORK_LOG_FORM);
+      if (session) await refreshAll(session.access_token);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not save the work log."); }
+  }
+
+  function openDailyUpdate(agentId = "") {
+    setDailyUpdateForm({ ...EMPTY_DAILY_UPDATE_FORM, agent_id: agentId, update_date: businessDate() });
+    setDrawer("dailyUpdate");
+  }
+
+  async function saveDailyUpdate() {
+    if (!dailyUpdateForm.agent_id || !dailyUpdateForm.summary.trim()) return setError("Choose an agent and provide the daily summary.");
+    try {
+      setError("");
+      const existing = updates.find((update) => String(update.agent_id) === dailyUpdateForm.agent_id && text(update.update_date).slice(0, 10) === dailyUpdateForm.update_date);
+      const payload = { ...dailyUpdateForm, summary: dailyUpdateForm.summary.trim(), completed: lineList(dailyUpdateForm.completed), blockers: lineList(dailyUpdateForm.blockers), next_steps: lineList(dailyUpdateForm.next_steps), asks: lineList(dailyUpdateForm.asks) };
+      await request(existing ? `/api/v1/daily-updates/${existing.id}` : "/api/v1/daily-updates", { method: existing ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      setDrawer(null); setDailyUpdateForm(EMPTY_DAILY_UPDATE_FORM);
+      if (session) await refreshAll(session.access_token);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not save the daily update."); }
+  }
+
+  function openLead(lead?: RecordValue) {
+    setSelectedLead(lead || null);
+    setLeadForm(lead ? {
+      property_id: text(lead.property_id, ""), assigned_agent_id: text(lead.assigned_agent_id, ""), contact_name: text(lead.contact_name, ""), company: text(lead.company, ""), email: text(lead.email, ""), phone: text(lead.phone, ""), source: text(lead.source, "website"), subject: text(lead.subject, ""), inquiry: text(lead.inquiry, ""), status: text(lead.status, "new"), priority: text(lead.priority, "medium"), next_follow_up_at: lead.next_follow_up_at ? new Date(String(lead.next_follow_up_at)).toISOString().slice(0, 16) : "", notes: text(lead.notes, ""),
+    } : EMPTY_LEAD_FORM);
+    setDrawer("lead");
+  }
+
+  async function saveLead() {
+    if (!leadForm.contact_name.trim() || !leadForm.inquiry.trim() || (!leadForm.email.trim() && !leadForm.phone.trim())) return setError("A lead requires a contact name, inquiry, and either email or phone.");
+    try {
+      setError("");
+      const payload = { ...leadForm, property_id: leadForm.property_id || null, assigned_agent_id: leadForm.assigned_agent_id || null, email: leadForm.email.trim() || null, phone: leadForm.phone.trim() || null, company: leadForm.company.trim() || null, subject: leadForm.subject.trim() || null, notes: leadForm.notes.trim() || null, next_follow_up_at: leadForm.next_follow_up_at ? new Date(leadForm.next_follow_up_at).toISOString() : null };
+      await request(selectedLead ? `/api/v1/leads/${selectedLead.id}` : "/api/v1/leads", { method: selectedLead ? "PATCH" : "POST", body: JSON.stringify(payload) });
+      setDrawer(null); setSelectedLead(null); setLeadForm(EMPTY_LEAD_FORM);
+      if (session) await refreshAll(session.access_token);
+    } catch (saveError) { setError(saveError instanceof Error ? saveError.message : "Could not save the lead."); }
   }
 
   async function decide(approval: RecordValue, status: "approved" | "changes_requested" | "declined") {
@@ -737,7 +838,7 @@ export function CommandCenter() {
   function renderWorkLogs() {
     return (
       <section className="deckPanel workLogPanel">
-        <header className="panelHead"><div><span>Documented execution</span><h2>{workLogs.length} work log entries</h2></div><small>Newest first</small></header>
+        <header className="panelHead"><div><span>Documented execution</span><h2>{workLogs.length} work log entries</h2></div><button className="outlineBtn" onClick={() => openWorkLog()}>New work log</button></header>
         <div className="workLogList">
           {workLogs.map((log) => (
             <article key={String(log.id)}>
@@ -825,6 +926,26 @@ export function CommandCenter() {
     );
   }
 
+  function renderLeads() {
+    const visibleLeads = leads.filter((lead) => {
+      const statusMatch = leadStatus === "all" || text(lead.status) === leadStatus;
+      const laneMatch = lane === "all" || String(lead.assigned_agent_id) === lane;
+      const searchMatch = !query.trim() || JSON.stringify(lead).toLowerCase().includes(query.trim().toLowerCase());
+      return statusMatch && laneMatch && searchMatch;
+    });
+    const open = leads.filter((lead) => !["won", "lost", "spam"].includes(text(lead.status))).length;
+    const followUps = leads.filter((lead) => lead.next_follow_up_at && new Date(String(lead.next_follow_up_at)) <= new Date() && !["won", "lost", "spam"].includes(text(lead.status))).length;
+    return <div className="leadsWorkspace">
+      <section className="metricDeck leadsMetrics"><div><span>Open inquiries</span><strong>{String(open).padStart(2, "0")}</strong><small>Active conversations</small></div><div><span>New</span><strong>{String(leads.filter((lead) => text(lead.status) === "new").length).padStart(2, "0")}</strong><small>Awaiting first response</small></div><div><span>Follow-ups due</span><strong>{String(followUps).padStart(2, "0")}</strong><small>Needs action now</small></div><div><span>Won</span><strong>{String(leads.filter((lead) => text(lead.status) === "won").length).padStart(2, "0")}</strong><small>Converted inquiries</small></div></section>
+      <section className="deckPanel leadsLedger"><header className="panelHead"><div><span>Inquiry pipeline</span><h2>{visibleLeads.length} leads across your properties</h2></div><button className="liveBtn" onClick={() => openLead()}>New lead</button></header>
+        <div className="leadFilters"><span>Status</span>{["all", "new", "contacted", "qualified", "proposal", "won", "lost"].map((status) => <button key={status} className={leadStatus === status ? "active" : ""} onClick={() => setLeadStatus(status)}>{statusLabel(status)}</button>)}</div>
+        <div className="leadHead"><span>Contact</span><span>Property</span><span>Source</span><span>Inquiry</span><span>Owner</span><span>Status</span><span>Follow-up</span></div>
+        {visibleLeads.map((lead) => <button className="leadRow" key={String(lead.id)} onClick={() => openLead(lead)}><span><b>{text(lead.contact_name)}</b><small>{text(lead.company, text(lead.email || lead.phone))}</small></span><span>{text(contentPropertyMap.get(String(lead.property_id))?.name, "Unassigned")}</span><span className="leadSource">{statusLabel(text(lead.source, "other"))}</span><span><b>{text(lead.subject, "General inquiry")}</b><small>{text(lead.inquiry)}</small></span><span>{agentMap.get(String(lead.assigned_agent_id)) || "Unassigned"}</span><span className={`statusPill s${text(lead.status).replace("_", "")}`}><i />{statusLabel(text(lead.status))}</span><span>{dateLabel(lead.next_follow_up_at)}</span></button>)}
+        {!visibleLeads.length && <p className="opsEmpty">No inquiries match this view. Add a lead manually or connect a property intake source to the Leads API.</p>}
+      </section>
+    </div>;
+  }
+
   function renderApprovals() {
     return (
       <div className="approvalDeck">
@@ -852,9 +973,11 @@ export function CommandCenter() {
       <header className="mobileCommandHeader">
         <div className="mobileStatus"><span>OCC · Secure</span><span className="mobileLink"><i />Link stable</span><span>100%</span></div>
         <div className="mobileTitleRow">
+          {/* Vinext's dev runtime does not currently support next/image reliably. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <span className="mobileMark"><img src="/herzen-mark-white.png" alt="" /></span>
           <div><span className="liveLabel"><i />Live operation</span><h1>{VIEWS.find((item) => item.id === view)?.label}</h1></div>
-          <button className="mobileNew" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New</button>
+          {view !== "workflows" && <button className="mobileNew" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New</button>}
         </div>
         <nav className="mobileViewStrip" aria-label="Operations views">
           {VIEWS.map((item) => (
@@ -874,12 +997,12 @@ export function CommandCenter() {
         <nav className="deckNav">
           {VIEWS.map((item) => (
             <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
-              <i /><span>{item.label}</span><em>{item.id === "approvals" ? String(pendingApprovals.length).padStart(2, "0") : item.id === "list" ? String(tasks.length).padStart(2, "0") : item.id === "worklogs" ? String(workLogs.length).padStart(2, "0") : item.id === "content" ? String(contentItems.length).padStart(2, "0") : ""}</em>
+              <i /><span>{item.label}</span><em>{item.id === "approvals" ? String(pendingApprovals.length).padStart(2, "0") : item.id === "list" ? String(tasks.length).padStart(2, "0") : item.id === "worklogs" ? String(workLogs.length).padStart(2, "0") : item.id === "content" ? String(contentItems.length).padStart(2, "0") : item.id === "leads" ? String(leads.filter((lead) => text(lead.status) === "new").length).padStart(2, "0") : ""}</em>
             </button>
           ))}
         </nav>
         <section className="roster">
-          <span className="railLabel">Agent spaces</span>
+          <span className="railLabel railLabelAction">Agent spaces <button onClick={() => openAgentForm()} aria-label="Create agent">+</button></span>
           {agents.map((agent) => (
             <button key={String(agent.id)} onClick={() => openAgent(agent)}>
               <span className="agentMark">{initials(agent.code || agent.name)}</span><span>{text(agent.name || agent.code)}</span><i className={text(agent.status, "active") === "active" ? "online" : ""} />
@@ -890,25 +1013,27 @@ export function CommandCenter() {
         </section>
       </aside>
 
-      <main className="deckMain">
-        <header className="deckHeader">
+      <main className={`deckMain ${view === "workflows" ? "workflowDeckMain" : ""}`}>
+        <header className={`deckHeader ${view === "workflows" ? "workflowDeckHeader" : ""}`}>
           <div className="titleBlock"><span className="liveLabel"><i />Live operation</span><h1>{VIEWS.find((item) => item.id === view)?.label}</h1><p>Direction enters here. Execution leaves documented.</p></div>
-          <div className="headerActions">
-            <label className="deckSearch"><span>/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search instructions" /></label>
+          {view !== "workflows" && <div className="headerActions">
+            <label className="deckSearch"><span>/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "leads" ? "Search inquiries" : "Search instructions"} /></label>
             <button className="outlineBtn" onClick={() => setDrawer("brief")}>Daily brief</button>
             <button className="liveBtn" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New instruction</button>
-          </div>
-          <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}</div>
+          </div>}
+          {view !== "workflows" && <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}</div>}
         </header>
 
-        <section className="deckContent">
+        <section className={`deckContent ${view === "workflows" ? "workflowDeckContent" : ""}`}>
           {error && <div className="opsError">{error}</div>}
           {view === "command" && renderCommand()}
           {view === "list" && renderList()}
           {view === "kanban" && renderKanban()}
           {view === "worklogs" && renderWorkLogs()}
           {view === "content" && renderContent()}
+          {view === "leads" && renderLeads()}
           {view === "approvals" && renderApprovals()}
+          {view === "workflows" && session?.access_token && <WorkflowDesigner accessToken={session.access_token} />}
         </section>
       </main>
 
@@ -1023,10 +1148,48 @@ export function CommandCenter() {
                 <button className="liveBtn full" type="submit">{selectedContent ? "Save content record" : "Create content record"}</button>
               </form>
             )}
+            {drawer === "lead" && (
+              <form onSubmit={(event) => { event.preventDefault(); void saveLead(); }}>
+                <span className="liveLabel"><i />Inquiry intake</span><h2>{selectedLead ? "Move the conversation forward." : "Capture a new lead."}</h2><p>Every inquiry is tied to a property, owned by a lane, and tracked through a clear commercial pipeline.</p>
+                <div className="formPair"><label>Contact name<input value={leadForm.contact_name} onChange={(event) => setLeadForm({ ...leadForm, contact_name: event.target.value })} /></label><label>Company<input value={leadForm.company} onChange={(event) => setLeadForm({ ...leadForm, company: event.target.value })} /></label></div>
+                <div className="formPair"><label>Email<input type="email" value={leadForm.email} onChange={(event) => setLeadForm({ ...leadForm, email: event.target.value })} /></label><label>Phone<input type="tel" value={leadForm.phone} onChange={(event) => setLeadForm({ ...leadForm, phone: event.target.value })} /></label></div>
+                <div className="formPair"><label>Property<select value={leadForm.property_id} onChange={(event) => setLeadForm({ ...leadForm, property_id: event.target.value })}><option value="">Unassigned</option>{contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)}>{text(property.name)}</option>)}</select></label><label>Source<select value={leadForm.source} onChange={(event) => setLeadForm({ ...leadForm, source: event.target.value })}><option value="website">Website</option><option value="instagram">Instagram</option><option value="linkedin">LinkedIn</option><option value="email">Email</option><option value="referral">Referral</option><option value="phone">Phone</option><option value="other">Other</option></select></label></div>
+                <label>Subject<input value={leadForm.subject} onChange={(event) => setLeadForm({ ...leadForm, subject: event.target.value })} /></label><label>Inquiry<textarea value={leadForm.inquiry} onChange={(event) => setLeadForm({ ...leadForm, inquiry: event.target.value })} /></label>
+                <div className="formPair"><label>Owner<select value={leadForm.assigned_agent_id} onChange={(event) => setLeadForm({ ...leadForm, assigned_agent_id: event.target.value })}><option value="">Unassigned</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label><label>Status<select value={leadForm.status} onChange={(event) => setLeadForm({ ...leadForm, status: event.target.value })}>{["new", "contacted", "qualified", "proposal", "won", "lost", "spam"].map((status) => <option key={status} value={status}>{statusLabel(status)}</option>)}</select></label></div>
+                <div className="formPair"><label>Priority<select value={leadForm.priority} onChange={(event) => setLeadForm({ ...leadForm, priority: event.target.value })}><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Next follow-up<input type="datetime-local" value={leadForm.next_follow_up_at} onChange={(event) => setLeadForm({ ...leadForm, next_follow_up_at: event.target.value })} /></label></div>
+                <label>Internal notes<textarea value={leadForm.notes} onChange={(event) => setLeadForm({ ...leadForm, notes: event.target.value })} /></label><button className="liveBtn full" type="submit">{selectedLead ? "Save lead" : "Add to pipeline"}</button>
+              </form>
+            )}
+            {drawer === "agentForm" && (
+              <form onSubmit={(event) => { event.preventDefault(); void saveAgent(); }}>
+                <span className="liveLabel"><i />Agent management</span><h2>{selectedAgent ? "Edit the operating lane." : "Add an agent to the roster."}</h2><p>Define the identity, charter, standing instructions, and capabilities Lupe will coordinate.</p>
+                <div className="formPair"><label>Code<input value={agentForm.code} onChange={(event) => setAgentForm({ ...agentForm, code: event.target.value })} placeholder="K2" /></label><label>Display name<input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label></div>
+                <div className="formPair"><label>Role<input value={agentForm.role} onChange={(event) => setAgentForm({ ...agentForm, role: event.target.value })} /></label><label>Status<select value={agentForm.status} onChange={(event) => setAgentForm({ ...agentForm, status: event.target.value })}><option value="active">Active</option><option value="paused">Paused</option><option value="retired">Retired</option></select></label></div>
+                <label>Operating lane<input value={agentForm.lane} onChange={(event) => setAgentForm({ ...agentForm, lane: event.target.value })} /></label><label>Charter<textarea value={agentForm.charter} onChange={(event) => setAgentForm({ ...agentForm, charter: event.target.value })} /></label><label>Standing instructions<textarea value={agentForm.instructions} onChange={(event) => setAgentForm({ ...agentForm, instructions: event.target.value })} /></label>
+                <label>Capabilities <small>One per line</small><textarea value={agentForm.capabilities} onChange={(event) => setAgentForm({ ...agentForm, capabilities: event.target.value })} /></label><button className="liveBtn full" type="submit">{selectedAgent ? "Save agent" : "Create agent"}</button>
+              </form>
+            )}
+            {drawer === "workLog" && (
+              <form onSubmit={(event) => { event.preventDefault(); void saveWorkLog(); }}>
+                <span className="liveLabel"><i />Execution evidence</span><h2>Document work while it is fresh.</h2><p>Connect the record to an agent and, when relevant, the instruction it advances.</p>
+                <div className="formPair"><label>Agent<select value={workLogForm.agent_id} onChange={(event) => setWorkLogForm({ ...workLogForm, agent_id: event.target.value })}><option value="">Choose agent</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label><label>Type<select value={workLogForm.entry_type} onChange={(event) => setWorkLogForm({ ...workLogForm, entry_type: event.target.value })}>{["note", "progress", "decision", "blocker", "deliverable", "evidence"].map((entry) => <option key={entry}>{entry}</option>)}</select></label></div>
+                <label>Instruction<select value={workLogForm.task_id} onChange={(event) => setWorkLogForm({ ...workLogForm, task_id: event.target.value })}><option value="">Agent lane / no instruction</option>{tasks.map((task) => <option key={String(task.id)} value={String(task.id)}>{text(task.title)}</option>)}</select></label><label>Title<input value={workLogForm.title} onChange={(event) => setWorkLogForm({ ...workLogForm, title: event.target.value })} /></label><label>Narrative<textarea value={workLogForm.body} onChange={(event) => setWorkLogForm({ ...workLogForm, body: event.target.value })} /></label>
+                <label>Artifact references <small>One URL or path per line</small><textarea value={workLogForm.artifacts} onChange={(event) => setWorkLogForm({ ...workLogForm, artifacts: event.target.value })} /></label><button className="liveBtn full" type="submit">Record work</button>
+              </form>
+            )}
+            {drawer === "dailyUpdate" && (
+              <form onSubmit={(event) => { event.preventDefault(); void saveDailyUpdate(); }}>
+                <span className="liveLabel"><i />Daily reporting</span><h2>Account for the operating lane.</h2><p>Submitting again for the same agent and business date updates the existing report.</p>
+                <div className="formPair"><label>Agent<select value={dailyUpdateForm.agent_id} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, agent_id: event.target.value })}><option value="">Choose agent</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label><label>Business date<input type="date" value={dailyUpdateForm.update_date} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, update_date: event.target.value })} /></label></div>
+                <label>Health<select value={dailyUpdateForm.health} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, health: event.target.value })}><option value="on_track">On track</option><option value="at_risk">At risk</option><option value="blocked">Blocked</option></select></label><label>Summary<textarea value={dailyUpdateForm.summary} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, summary: event.target.value })} /></label>
+                {([['completed','Completed'],['blockers','Blockers'],['next_steps','Next steps'],['asks','Asks']] as const).map(([field, label]) => <label key={field}>{label} <small>One per line</small><textarea value={dailyUpdateForm[field]} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, [field]: event.target.value })} /></label>)}
+                <button className="liveBtn full" type="submit">Save daily update</button>
+              </form>
+            )}
             {drawer === "agent" && selectedAgent && (() => {
               const mine = tasks.filter((task) => String(task.owner_agent_id) === String(selectedAgent.id));
               const update = latestUpdate.get(String(selectedAgent.id));
-              return <div><div className="agentDrawerHead"><span className="agentMark large">{initials(selectedAgent.code || selectedAgent.name)}</span><div><span className="liveLabel"><i />Agent space</span><h2>{text(selectedAgent.name || selectedAgent.code)}</h2></div></div><p>{text(selectedAgent.charter || selectedAgent.lane, "No charter documented.")}</p>
+              return <div><div className="agentDrawerHead"><span className="agentMark large">{initials(selectedAgent.code || selectedAgent.name)}</span><div><span className="liveLabel"><i />Agent space</span><h2>{text(selectedAgent.name || selectedAgent.code)}</h2></div></div><p>{text(selectedAgent.charter || selectedAgent.lane, "No charter documented.")}</p><div className="drawerActionRow"><button className="outlineBtn" onClick={() => openAgentForm(selectedAgent)}>Edit agent</button><button className="outlineBtn" onClick={() => openWorkLog(String(selectedAgent.id))}>Add work log</button><button className="liveBtn" onClick={() => openDailyUpdate(String(selectedAgent.id))}>Daily update</button></div>
                 <div className="agentStats"><div><b>{mine.filter((task) => !["done", "cancelled"].includes(taskStatus(task))).length}</b><span>Open</span></div><div><b>{mine.filter((task) => taskStatus(task) === "review").length}</b><span>Review</span></div><div><b>{mine.filter((task) => taskStatus(task) === "done").length}</b><span>Closed</span></div></div>
                 <h3>Instructions</h3>{mine.map((task) => <button className="drawerTask" key={String(task.id)} onClick={() => { setLane(String(selectedAgent.id)); setView("list"); setDrawer(null); }}><span>{statusLabel(taskStatus(task))}</span><b>{text(task.title)}</b><small>{dateLabel(task.due_at)}</small></button>)}
                 <h3>Latest daily update</h3>{update ? <><div className="briefLine"><span>Summary</span><p>{text(update.summary)}</p></div><div className="briefLine"><span>Blockers</span><p>{Array.isArray(update.blockers) ? update.blockers.join(" · ") : text(update.blockers, "None reported")}</p></div><div className="briefLine"><span>Next</span><p>{Array.isArray(update.next_steps) ? update.next_steps.join(" · ") : text(update.next_steps, "Not reported")}</p></div></> : <p>No daily update has been submitted.</p>}</div>;

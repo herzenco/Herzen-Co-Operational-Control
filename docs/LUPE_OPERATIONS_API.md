@@ -385,6 +385,56 @@ Content-Type: application/json
 When an approval is decided, the API automatically records `decided_by` and
 `decided_at`.
 
+## Workflow definitions
+
+Workflows are validated definitions only. These endpoints do not execute,
+schedule, test, or simulate them.
+
+```text
+GET    /api/v1/workflows?status=draft&owner_id=<uuid>&limit=100&offset=0
+POST   /api/v1/workflows
+GET    /api/v1/workflows/:id
+PATCH  /api/v1/workflows/:id
+DELETE /api/v1/workflows/:id
+GET    /api/v1/workflows/:id/versions?limit=100&offset=0
+POST   /api/v1/workflows/:id/versions/:version/restore
+```
+
+Create and update accept either the raw workflow JSON or a wrapped body:
+
+```json
+{
+  "definition": {
+    "id": "62be31f8-68e5-4f97-b171-a1b30c436510",
+    "name": "Daily content readiness review",
+    "description": "Prepare content for human review.",
+    "version": 1,
+    "status": "draft",
+    "trigger": {},
+    "nodes": [],
+    "edges": [],
+    "variables": {},
+    "createdAt": "2026-07-31T13:00:00.000Z",
+    "updatedAt": "2026-07-31T13:00:00.000Z",
+    "createdBy": "lupe"
+  }
+}
+```
+
+The complete definition is checked by the same Zod schema and graph validator
+used by the editor. Invalid definitions return `422 workflow_invalid` with the
+structured validation errors. Every successful create or update writes an
+immutable version snapshot. Restoring an older snapshot creates a new current
+version; it never rewrites or deletes history.
+
+JSON import and export preserve the submitted workflow definition losslessly.
+Credential fields contain secret names only and exported definitions never
+contain credential values.
+
+Active members can read workflow definitions and versions. Following the
+existing OCC role model, only owners and operators can create, update, restore,
+duplicate, or delete workflows.
+
 ## Status values
 
 Tasks:
@@ -421,6 +471,12 @@ Approvals:
 
 ```text
 pending | approved | changes_requested | declined | withdrawn
+```
+
+Workflows:
+
+```text
+draft | active | paused | archived
 ```
 
 Work-log types:

@@ -10,6 +10,8 @@ export type ResourceName =
   | "content-types"
   | "content-items"
   | "content-status-history"
+  | "leads"
+  | "workflows"
   | "activity";
 
 type ResourceConfig = {
@@ -126,6 +128,22 @@ export const resources: Record<ResourceName, ResourceConfig> = {
     updateFields: [],
     filters: ["content_item_id", "from_status", "to_status", "changed_by"],
     defaultOrder: "created_at",
+  },
+  leads: {
+    table: "leads",
+    mutable: true,
+    createFields: ["property_id", "assigned_agent_id", "contact_name", "company", "email", "phone", "source", "subject", "inquiry", "status", "priority", "next_follow_up_at", "notes", "metadata"],
+    updateFields: ["property_id", "assigned_agent_id", "contact_name", "company", "email", "phone", "source", "subject", "inquiry", "status", "priority", "next_follow_up_at", "notes", "metadata"],
+    filters: ["property_id", "assigned_agent_id", "source", "status", "priority"],
+    defaultOrder: "created_at",
+  },
+  workflows: {
+    table: "workflows",
+    mutable: true,
+    createFields: ["id", "name", "description", "version", "status", "definition", "owner_id"],
+    updateFields: ["name", "description", "status", "definition", "owner_id"],
+    filters: ["status", "owner_id"],
+    defaultOrder: "updated_at",
   },
   activity: {
     table: "activity_log",

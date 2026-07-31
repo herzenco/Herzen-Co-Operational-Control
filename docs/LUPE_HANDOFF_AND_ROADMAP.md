@@ -344,6 +344,22 @@ Useful signals for that decision:
 
 ## Local development and verification
 
+### Workflow designer status
+
+The OCC now includes a definition-only workflow designer. Desktop operators can
+compose and validate workflows with React Flow, save versioned definitions,
+restore immutable snapshots, duplicate definitions, and import/export JSON.
+Mobile remains a read-only workflow list. There is intentionally no execution
+engine, scheduler, run history, or Run/Test control.
+
+The additive workflow migration is
+`supabase/migrations/20260731183050_workflow_definitions.sql`. It creates
+`workflows` and `workflow_versions`, applies the existing active-member read and
+owner/operator write model, and captures workflow changes in `activity_log`.
+
+The production database migration must be applied and verified before the
+workflow persistence UI can save remote records.
+
 Run locally:
 
 ```bash

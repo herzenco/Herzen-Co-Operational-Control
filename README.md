@@ -7,6 +7,9 @@ Start with the project documentation:
   build next.
 - [`docs/LUPE_OPERATIONS_API.md`](docs/LUPE_OPERATIONS_API.md) — authentication,
   endpoints, resources, payloads, and API operating guidance.
+- [`docs/OPERATIONS_COMMAND_CENTER_PRODUCT_SPEC.md`](docs/OPERATIONS_COMMAND_CENTER_PRODUCT_SPEC.md) —
+  detailed product, workflow, interface, data, security, API, and delivery
+  specification for the Command Center.
 - [`Operations Control Center - Capabilities and Operating Guide.md`](Operations%20Control%20Center%20-%20Capabilities%20and%20Operating%20Guide.md) —
   original product capabilities and operating vision.
 
