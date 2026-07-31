@@ -42,6 +42,8 @@ type ContentForm = {
   title: string;
   brief: string;
   body: string;
+  caption: string;
+  creative_asset_path: string;
   property_id: string;
   channel_id: string;
   content_type_id: string;
@@ -73,6 +75,8 @@ const EMPTY_CONTENT_FORM: ContentForm = {
   title: "",
   brief: "",
   body: "",
+  caption: "",
+  creative_asset_path: "",
   property_id: "",
   channel_id: "",
   content_type_id: "",
@@ -184,6 +188,7 @@ export function CommandCenter() {
   const [leadForm, setLeadForm] = useState<LeadForm>(EMPTY_LEAD_FORM);
   const [leadStatus, setLeadStatus] = useState("all");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [creativeFile, setCreativeFile] = useState<File | null>(null);
   const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
   const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
   const [calendarMonth, setCalendarMonth] = useState("");
@@ -215,28 +220,30 @@ export function CommandCenter() {
   }, [supabase]);
 
   useEffect(() => {
-    setCalendarMonth(new Date().toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", timeZone: "America/New_York" }));
+    const timer = window.setTimeout(() => {
+      setCalendarMonth(new Date().toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", timeZone: "America/New_York" }));
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, []);
 
   useEffect(() => {
-    if (!contentProperties.length) return;
-    setSelectedPropertyId((current) => current || String(contentProperties.find((property) => text(property.status) === "active")?.id || contentProperties[0]?.id || ""));
-  }, [contentProperties]);
-
-  useEffect(() => {
     const paths = contentItems
-      .map((item) => ({ id: String(item.id), path: text(item.screenshot_path, "") }))
+      .map((item) => {
+        return { id: String(item.id), path: text(item.creative_asset_path, "") };
+      })
       .filter((item) => item.path);
     if (!paths.length) {
-      setContentMediaUrls({});
-      setContentDownloadUrls({});
-      return;
+      const timer = window.setTimeout(() => {
+        setContentMediaUrls({});
+        setContentDownloadUrls({});
+      }, 0);
+      return () => window.clearTimeout(timer);
     }
     let cancelled = false;
     void Promise.all(paths.map(async ({ id, path }) => {
       const [preview, download] = await Promise.all([
-        supabase.storage.from("content-publication-evidence").createSignedUrl(path, 3600),
-        supabase.storage.from("content-publication-evidence").createSignedUrl(path, 3600, { download: `content-${id}` }),
+        supabase.storage.from("content-creative-assets").createSignedUrl(path, 3600),
+        supabase.storage.from("content-creative-assets").createSignedUrl(path, 3600, { download: `content-${id}` }),
       ]);
       return { id, preview: preview.data?.signedUrl || "", download: download.data?.signedUrl || "" };
     })).then((urls) => {
@@ -585,14 +592,25 @@ export function CommandCenter() {
     return text(contentTypeMap.get(String(item.content_type_id))?.name, "K2 to decide");
   }
 
+  function contentPictureUrl(item: RecordValue) {
+    return contentMediaUrls[String(item.id)] || "";
+  }
+
+  function contentPictureDownloadUrl(item: RecordValue) {
+    return contentDownloadUrls[String(item.id)] || contentPictureUrl(item);
+  }
+
   function openContent(item?: RecordValue) {
     const nextItem = item || null;
     setSelectedContent(nextItem);
     setEvidenceFile(null);
+    setCreativeFile(null);
     setContentForm(nextItem ? {
       title: text(nextItem.title, ""),
       brief: text(nextItem.brief, ""),
       body: text(nextItem.body, ""),
+      caption: text(nextItem.caption, ""),
+      creative_asset_path: text(nextItem.creative_asset_path, ""),
       property_id: text(nextItem.property_id, ""),
       channel_id: text(nextItem.channel_id, ""),
       content_type_id: text(nextItem.content_type_id, ""),
@@ -622,9 +640,36 @@ export function CommandCenter() {
       setError("Content requires a title, property, and publishing channel.");
       return;
     }
+    const chosenProperty = contentProperties.find((property) => String(property.id) === contentForm.property_id);
+    const chosenOwner = agents.find((agent) => String(agent.id) === contentForm.owner_agent_id);
+    const requiresBubblesCreative = text(chosenProperty?.slug, "").toLowerCase() === "bubbles-n-salt"
+      && text(chosenOwner?.code, "").toLowerCase() === "c-3po";
+    if (requiresBubblesCreative && !contentForm.caption.trim()) {
+      setError("Bubbles n Salt posts owned by C-3PO require the final caption.");
+      return;
+    }
+    if (requiresBubblesCreative && !creativeFile && !contentForm.creative_asset_path) {
+      setError("Bubbles n Salt posts owned by C-3PO require an uploaded post image.");
+      return;
+    }
 
     try {
       setError("");
+      let creativeAssetPath = contentForm.creative_asset_path;
+      if (creativeFile) {
+        if (!session?.user.id) throw new Error("Your session expired.");
+        const extension = creativeFile.name.split(".").pop()?.toLowerCase() || "png";
+        const objectPath = `${session.user.id}/${selectedContent?.id || crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`;
+        const { error: creativeUploadError } = await supabase.storage
+          .from("content-creative-assets")
+          .upload(objectPath, creativeFile, {
+            cacheControl: "3600",
+            contentType: creativeFile.type,
+            upsert: false,
+          });
+        if (creativeUploadError) throw creativeUploadError;
+        creativeAssetPath = objectPath;
+      }
       let screenshotPath = text(selectedContent?.screenshot_path, "");
       if (evidenceFile) {
         if (!session?.user.id) throw new Error("Your session expired.");
@@ -645,6 +690,8 @@ export function CommandCenter() {
         title: contentForm.title.trim(),
         brief: contentForm.brief.trim() || null,
         body: contentForm.body.trim() || null,
+        caption: contentForm.caption.trim() || null,
+        creative_asset_path: creativeAssetPath || null,
         property_id: contentForm.property_id,
         channel_id: contentForm.channel_id,
         content_type_id: contentForm.content_type_id || null,
@@ -674,6 +721,7 @@ export function CommandCenter() {
       setSelectedContent(null);
       setContentForm(EMPTY_CONTENT_FORM);
       setEvidenceFile(null);
+      setCreativeFile(null);
       if (session) await refreshAll(session.access_token);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the content item.");
@@ -974,7 +1022,7 @@ export function CommandCenter() {
           {filteredContent.map((item) => (
             <article key={String(item.id)} onClick={() => previewContent(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") previewContent(item); }} role="button" tabIndex={0}>
               <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
-              <span className="contentTitle contentTitleButton"><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small></span>
+              <span className="contentTitle contentTitleButton"><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</span>
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
               <button className="ownerLink" onClick={(event) => { event.stopPropagation(); const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
@@ -1006,7 +1054,10 @@ export function CommandCenter() {
             <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
             <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
               {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
-                {contentMediaUrls[String(item.id)] ? <img src={contentMediaUrls[String(item.id)]} alt={`Preview for ${text(item.title)}`} /> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
+                {contentPictureUrl(item) ? <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={contentPictureUrl(item)} alt={`Preview for ${text(item.title)}`} />
+                </> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
                 <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
               </button>)}
               {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
@@ -1164,24 +1215,28 @@ export function CommandCenter() {
                 <div className="contentPreviewMeta">
                   <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
                 </div>
-                {contentMediaUrls[String(selectedContent.id)] ? (
+                {contentPictureUrl(selectedContent) ? (
                   <figure className="contentCreative">
-                    <img src={contentMediaUrls[String(selectedContent.id)]} alt={`Creative for ${text(selectedContent.title)}`} />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={contentPictureUrl(selectedContent)} alt={`Creative for ${text(selectedContent.title)}`} />
                     <figcaption>Original stored creative · secure preview</figcaption>
                   </figure>
                 ) : (
                   <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>No creative attached yet</b><small>Add the final image in Edit content so it can be previewed and downloaded here.</small></div>
                 )}
-                <section className="previewCopy"><span>Caption / final copy</span><p>{text(selectedContent.body, "No final copy has been documented yet.")}</p></section>
+                <section className="previewCopy"><span>Caption</span><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
+                {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
                 {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
                 <dl className="contentPreviewFacts">
                   <div><dt>Publishes</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Not scheduled"}</dd></div>
                   <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
                   <div><dt>Owner</dt><dd>{agentMap.get(String(selectedContent.owner_agent_id)) || "Unassigned"}</dd></div>
                   <div><dt>Distribution</dt><dd>{text(selectedContent.distribution_mode)}</dd></div>
+                  <div><dt>Post image asset</dt><dd>{text(selectedContent.creative_asset_path, "Not uploaded")}</dd></div>
+                  <div><dt>Publication proof</dt><dd>{selectedContent.screenshot_path ? "Screenshot stored separately" : "Not recorded"}</dd></div>
                 </dl>
                 <div className="previewActions">
-                  {contentDownloadUrls[String(selectedContent.id)] && <a className="liveBtn" href={contentDownloadUrls[String(selectedContent.id)]}>Download original image</a>}
+                  {contentPictureDownloadUrl(selectedContent) && <a className="liveBtn" href={contentPictureDownloadUrl(selectedContent)}>Download original image</a>}
                   {Boolean(selectedContent.final_url) && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
                   <button className="outlineBtn" onClick={() => openContent(selectedContent)}>Edit content</button>
                 </div>
@@ -1195,6 +1250,11 @@ export function CommandCenter() {
                 <label>Title<input value={contentForm.title} onChange={(event) => setContentForm({ ...contentForm, title: event.target.value })} placeholder="What are we publishing?" /></label>
                 <label>Brief<textarea value={contentForm.brief} onChange={(event) => setContentForm({ ...contentForm, brief: event.target.value })} placeholder="Audience, objective, offer, and required context." /></label>
                 <label>Draft / final copy<textarea className="contentBodyField" value={contentForm.body} onChange={(event) => setContentForm({ ...contentForm, body: event.target.value })} placeholder="Document the working or final content here." /></label>
+                <label>Caption<textarea className="contentCaptionField" value={contentForm.caption} onChange={(event) => setContentForm({ ...contentForm, caption: event.target.value })} placeholder="Exact final text that will publish with the post." /></label>
+                <label>Post image
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCreativeFile(event.target.files?.[0] || null)} />
+                  <small>{creativeFile ? `${creativeFile.name} is ready to upload.` : contentForm.creative_asset_path ? `Stored asset: ${contentForm.creative_asset_path}` : "Upload the final pre-publication creative. Required for Bubbles n Salt posts owned by C-3PO."}</small>
+                </label>
                 <div className="formPair">
                   <label>Property
                     <select value={contentForm.property_id} onChange={(event) => {

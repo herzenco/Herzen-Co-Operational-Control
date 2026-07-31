@@ -100,7 +100,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
     table: "content_items",
     mutable: true,
     createFields: [
-      "title", "brief", "body", "property_id", "channel_id", "content_type_id",
+      "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
       "owner_agent_id", "research_owner_agent_id", "task_id", "approval_id",
       "distribution_mode", "status", "approval_required",
       "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
@@ -108,7 +108,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "legacy_content_item_id", "legacy_review_url", "source_system",
     ],
     updateFields: [
-      "title", "brief", "body", "property_id", "channel_id", "content_type_id",
+      "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
       "owner_agent_id", "research_owner_agent_id", "task_id", "approval_id",
       "distribution_mode", "status", "approval_required",
       "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
