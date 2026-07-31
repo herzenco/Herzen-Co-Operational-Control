@@ -1173,7 +1173,7 @@ export function CommandCenter() {
                   <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>No creative attached yet</b><small>Add the final image in Edit content so it can be previewed and downloaded here.</small></div>
                 )}
                 <section className="previewCopy"><span>Caption / final copy</span><p>{text(selectedContent.body, "No final copy has been documented yet.")}</p></section>
-                {selectedContent.brief && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
+                {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
                 <dl className="contentPreviewFacts">
                   <div><dt>Publishes</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Not scheduled"}</dd></div>
                   <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
@@ -1182,7 +1182,7 @@ export function CommandCenter() {
                 </dl>
                 <div className="previewActions">
                   {contentDownloadUrls[String(selectedContent.id)] && <a className="liveBtn" href={contentDownloadUrls[String(selectedContent.id)]}>Download original image</a>}
-                  {selectedContent.final_url && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
+                  {Boolean(selectedContent.final_url) && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
                   <button className="outlineBtn" onClick={() => openContent(selectedContent)}>Edit content</button>
                 </div>
               </div>
