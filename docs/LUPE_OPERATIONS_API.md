@@ -23,7 +23,7 @@ by Git. Production credentials should be placed in Lupe's secret manager.
 Local:
 
 ```text
-http://localhost:3000/api/v1
+http://localhost:4000/api/v1
 ```
 
 Production:
@@ -31,6 +31,13 @@ Production:
 ```text
 https://operations.herzenco.co/api/v1
 ```
+
+Live behavior verified on 2026-07-31:
+
+- `GET /api/v1` without a bearer token returns `401 unauthorized`.
+- The production response message is:
+  `Send a Supabase access token as Authorization: Bearer <token>.`
+- `https://operations.herzenco.co/login` is publicly reachable.
 
 ## Authenticate
 
@@ -138,9 +145,9 @@ Supported filters:
 ## Content operating model
 
 The Operations Control Center is the intended system of record for content
-operations. During the migration window, content items may also keep the legacy
-Herzen Content Engine identifier and review URL so older drafts and schedules
-can be reconciled here.
+operations. Default to OCC-native workflow as the clean-slate operating path.
+Legacy bridge fields exist only for optional reconciliation of older records
+that still need to be referenced here.
 
 Supported bridge fields:
 
@@ -244,7 +251,7 @@ Screenshots belong in the private `content-publication-evidence` bucket.
 Authenticated owners/operators may upload JPEG, PNG, or WebP files up to 10 MB
 under a folder named with their Supabase user ID.
 
-### Import a legacy Content Engine item
+### Reconcile a legacy Content Engine item when explicitly needed
 
 ```http
 POST /api/v1/content-items

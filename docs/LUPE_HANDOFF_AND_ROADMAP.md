@@ -262,16 +262,16 @@ The following are complete:
 - Content properties, channels, workflow, history, and evidence rules.
 - Authenticated UI and generic Lupe CRUD API.
 - Tito-linked approval decisions.
-- Legacy Content Engine bridge fields on content items:
+- Optional legacy reconciliation fields on content items:
   `legacy_content_item_id`, `legacy_review_url`, and `source_system`.
-- Migration helper scripts for importing the legacy local content schedule and
-  generating tomorrow's OCC review pack.
+- Helper scripts for optional legacy reconciliation and for generating
+  tomorrow's OCC review pack from OCC records.
 - Local application and automated build/tests.
 
 The following are modeled but not yet end-to-end integrations:
 
-- Full cutover from the older Herzen Content Engine local state and review-pack
-  scripts.
+- Full retirement of ad hoc local content-state handling in favor of OCC-native
+  operations.
 - Website feed delivery and destination-site confirmation.
 - LinkedIn callback/webhook reconciliation with Lupe's automation.
 - Instagram automated publishing.
@@ -283,10 +283,9 @@ The following are modeled but not yet end-to-end integrations:
 
 ### Priority 1 — Stabilize content operation
 
-- Move all daily review-pack and schedule reads from the old
-  `herzenco-content-automation-state.json` file into OCC-backed content items.
-- Import active and near-term Herzen Co. content from the legacy Content Engine
-  into OCC and reconcile scheduled timestamps.
+- Use OCC-backed content items, approvals, and publish dates as the primary
+  source of truth for review packs and scheduling.
+- Keep the legacy bridge available only for explicit reconciliation work.
 - Replace old WhatsApp content notices so they read OCC as the source of truth.
 
 - Add a content-detail page or richer drawer with comments, versions, research
