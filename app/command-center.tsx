@@ -171,7 +171,7 @@ export function CommandCenter() {
   const [contentAccount, setContentAccount] = useState("all");
   const [contentType, setContentType] = useState("all");
   const [todayLabel, setTodayLabel] = useState("Today");
-  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | null>(null);
+  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
   const [selectedContent, setSelectedContent] = useState<RecordValue | null>(null);
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
@@ -184,6 +184,11 @@ export function CommandCenter() {
   const [leadForm, setLeadForm] = useState<LeadForm>(EMPTY_LEAD_FORM);
   const [leadStatus, setLeadStatus] = useState("all");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
+  const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
+  const [calendarMonth, setCalendarMonth] = useState("");
+  const [selectedPropertyId, setSelectedPropertyId] = useState("");
+  const [selectedPropertyPlatform, setSelectedPropertyPlatform] = useState("");
   const [error, setError] = useState("");
   const [busy, startTransition] = useTransition();
 
@@ -208,6 +213,39 @@ export function CommandCenter() {
       subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    setCalendarMonth(new Date().toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", timeZone: "America/New_York" }));
+  }, []);
+
+  useEffect(() => {
+    if (!contentProperties.length) return;
+    setSelectedPropertyId((current) => current || String(contentProperties.find((property) => text(property.status) === "active")?.id || contentProperties[0]?.id || ""));
+  }, [contentProperties]);
+
+  useEffect(() => {
+    const paths = contentItems
+      .map((item) => ({ id: String(item.id), path: text(item.screenshot_path, "") }))
+      .filter((item) => item.path);
+    if (!paths.length) {
+      setContentMediaUrls({});
+      setContentDownloadUrls({});
+      return;
+    }
+    let cancelled = false;
+    void Promise.all(paths.map(async ({ id, path }) => {
+      const [preview, download] = await Promise.all([
+        supabase.storage.from("content-publication-evidence").createSignedUrl(path, 3600),
+        supabase.storage.from("content-publication-evidence").createSignedUrl(path, 3600, { download: `content-${id}` }),
+      ]);
+      return { id, preview: preview.data?.signedUrl || "", download: download.data?.signedUrl || "" };
+    })).then((urls) => {
+      if (cancelled) return;
+      setContentMediaUrls(Object.fromEntries(urls.map(({ id, preview }) => [id, preview])));
+      setContentDownloadUrls(Object.fromEntries(urls.map(({ id, download }) => [id, download])));
+    });
+    return () => { cancelled = true; };
+  }, [contentItems, supabase]);
 
   useEffect(() => {
     if (!session) return;
@@ -568,6 +606,11 @@ export function CommandCenter() {
     setDrawer("content");
   }
 
+  function previewContent(item: RecordValue) {
+    setSelectedContent(item);
+    setDrawer("contentPreview");
+  }
+
   function channelsForProperty(propertyId: string) {
     return contentChannels.filter((channel) =>
       String(channel.property_id) === propertyId && text(channel.status, "active") !== "archived"
@@ -867,6 +910,26 @@ export function CommandCenter() {
     const scheduled = filteredContent.filter((item) => ["scheduled", "publishing"].includes(text(item.status)));
     const inReview = filteredContent.filter((item) => ["ready_for_lupe", "awaiting_tito", "revision_requested"].includes(text(item.status)));
     const published = filteredContent.filter((item) => text(item.status) === "published");
+    const monthDate = calendarMonth ? new Date(`${calendarMonth}-01T12:00:00`) : new Date();
+    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(monthStart.getDate() - monthStart.getDay());
+    const calendarDays = Array.from({ length: 42 }, (_, index) => {
+      const day = new Date(gridStart);
+      day.setDate(gridStart.getDate() + index);
+      return day;
+    });
+    const selectedProperty = contentProperties.find((property) => String(property.id) === selectedPropertyId) || contentProperties[0];
+    const propertyChannels = selectedProperty ? contentChannels.filter((channel) => String(channel.property_id) === String(selectedProperty.id)) : [];
+    const propertyPlatforms = [...new Set(propertyChannels.map((channel) => text(channel.platform)).filter(Boolean))];
+    const activePropertyPlatform = propertyPlatforms.includes(selectedPropertyPlatform) ? selectedPropertyPlatform : (propertyPlatforms[0] || "");
+    const previewItems = contentItems.filter((item) =>
+      String(item.property_id) === String(selectedProperty?.id) && contentPlatformForItem(item) === activePropertyPlatform
+    ).sort((left, right) => new Date(String(right.publish_at || right.created_at)).getTime() - new Date(String(left.publish_at || left.created_at)).getTime());
+    const changeMonth = (amount: number) => {
+      const next = new Date(monthDate.getFullYear(), monthDate.getMonth() + amount, 1);
+      setCalendarMonth(next.toLocaleDateString("en-CA", { year: "numeric", month: "2-digit" }));
+    };
     return (
       <div className="contentWorkspace">
         <section className="metricDeck contentMetrics">
@@ -876,8 +939,31 @@ export function CommandCenter() {
           <div><span>Properties</span><strong>{contentProperties.filter((property) => text(property.status) === "active").length}</strong><small>{contentProperties.filter((property) => text(property.status) === "paused").length} property paused</small></div>
         </section>
 
+        <section className="deckPanel publishingCalendar">
+          <header className="panelHead calendarPanelHead"><div><span>Publishing calendar</span><h2>{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(monthDate)}</h2></div><div className="calendarControls"><button onClick={() => changeMonth(-1)} aria-label="Previous month">←</button><button onClick={() => changeMonth(1)} aria-label="Next month">→</button><button className="liveBtn" onClick={() => openContent()}>New content</button></div></header>
+          <div className="propertyLegend" aria-label="Property color key">
+            {contentProperties.map((property, index) => <span key={String(property.id)}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}</span>)}
+          </div>
+          <div className="publishingCalendarGrid">
+            {calendarDays.map((day) => {
+              const dayKey = day.toLocaleDateString("en-CA");
+              const dayItems = filteredContent.filter((item) => item.publish_at && new Date(String(item.publish_at)).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === dayKey);
+              return <div key={dayKey} className={`publishingDay ${day.getMonth() !== monthDate.getMonth() ? "outside" : ""}`}>
+                <time>{day.getDate()}</time>
+                {dayItems.map((item) => {
+                  const propertyIndex = Math.max(0, contentProperties.findIndex((property) => String(property.id) === String(item.property_id)));
+                  return <button key={String(item.id)} className={`calendarContent tone${propertyIndex % 4}`} onClick={() => previewContent(item)}>
+                    <b>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</b>
+                    <span>{text(item.title)}</span><small>{contentPlatformForItem(item)}</small>
+                  </button>;
+                })}
+              </div>;
+            })}
+          </div>
+        </section>
+
         <section className="deckPanel contentSchedule">
-          <header className="panelHead"><div><span>Publishing desk</span><h2>Content operations</h2></div><button className="liveBtn" onClick={() => openContent()}>New content</button></header>
+          <header className="panelHead"><div><span>Publishing desk</span><h2>Content records</h2></div><small>Click any item to open its preview</small></header>
           <div className="contentFilters">
             <label>Platform<select value={contentPlatform} onChange={(event) => setContentPlatform(event.target.value)}><option value="all">All platforms</option>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select></label>
             <label>Account<select value={contentAccount} onChange={(event) => setContentAccount(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select></label>
@@ -886,14 +972,14 @@ export function CommandCenter() {
           </div>
           <div className="contentHead"><span>Date</span><span>Content</span><span>Platform</span><span>Account</span><span>Owner</span><span>Stage</span><span /></div>
           {filteredContent.map((item) => (
-            <article key={String(item.id)}>
+            <article key={String(item.id)} onClick={() => previewContent(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") previewContent(item); }} role="button" tabIndex={0}>
               <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
-              <button className="contentTitle contentTitleButton" onClick={() => openContent(item)}><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small></button>
+              <span className="contentTitle contentTitleButton"><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small></span>
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
-              <button className="ownerLink" onClick={() => { const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
+              <button className="ownerLink" onClick={(event) => { event.stopPropagation(); const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
               <span className={`statusPill s${text(item.status).replaceAll("_", "")}`}><i />{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</span>
-              <span className="contentActions">
+              <span className="contentActions" onClick={(event) => event.stopPropagation()}>
                 {["idea", "revision_requested"].includes(text(item.status)) && <button onClick={() => void advanceContent(item, "research_ready")}>Research ready</button>}
                 {text(item.status) === "research_ready" && <button onClick={() => void advanceContent(item, "drafting")}>Start draft</button>}
                 {text(item.status) === "drafting" && <button onClick={() => void advanceContent(item, "ready_for_lupe")}>Send to Lupe</button>}
@@ -909,18 +995,23 @@ export function CommandCenter() {
         </section>
 
         <section className="deckPanel propertyPanel">
-          <header className="panelHead"><div><span>Properties</span><h2>Publishing destinations</h2></div><small>Configured operating map</small></header>
-          <div className="propertyGrid">
-            {contentProperties.map((property) => (
-              <article key={String(property.id)} className={text(property.status) === "paused" ? "paused" : ""}>
-                <header><b>{text(property.name)}</b><span>{text(property.status)}</span></header>
-                {contentChannels.filter((channel) => String(channel.property_id) === String(property.id)).map((channel) => (
-                  <div key={String(channel.id)}><span>{text(channel.platform)}</span><small>{text(channel.publishing_mode).replaceAll("_", " ")}</small></div>
-                ))}
-                <p>{text(property.notes, "No operating note.")}</p>
-              </article>
-            ))}
+          <header className="panelHead"><div><span>Properties</span><h2>Channel preview</h2></div><small>See the feed before it publishes</small></header>
+          <div className="propertyTabs" role="tablist" aria-label="Publishing properties">
+            {contentProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
           </div>
+          {selectedProperty && <div className="propertyPreview">
+            <div className="platformTabs" role="tablist" aria-label={`${text(selectedProperty.name)} platforms`}>
+              {propertyPlatforms.map((platform) => <button key={platform} role="tab" aria-selected={platform === activePropertyPlatform} className={platform === activePropertyPlatform ? "active" : ""} onClick={() => setSelectedPropertyPlatform(platform)}>{platform}</button>)}
+            </div>
+            <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
+            <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
+              {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
+                {contentMediaUrls[String(item.id)] ? <img src={contentMediaUrls[String(item.id)]} alt={`Preview for ${text(item.title)}`} /> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
+                <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
+              </button>)}
+              {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
+            </div>
+          </div>}
         </section>
       </div>
     );
@@ -1066,6 +1157,36 @@ export function CommandCenter() {
                 <button className="liveBtn full" type="submit">Issue instruction</button>
               </form>
             )}
+            {drawer === "contentPreview" && selectedContent && (
+              <div className="contentPreviewDrawer">
+                <span className="liveLabel"><i />Content preview</span>
+                <h2>{text(selectedContent.title)}</h2>
+                <div className="contentPreviewMeta">
+                  <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
+                </div>
+                {contentMediaUrls[String(selectedContent.id)] ? (
+                  <figure className="contentCreative">
+                    <img src={contentMediaUrls[String(selectedContent.id)]} alt={`Creative for ${text(selectedContent.title)}`} />
+                    <figcaption>Original stored creative · secure preview</figcaption>
+                  </figure>
+                ) : (
+                  <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>No creative attached yet</b><small>Add the final image in Edit content so it can be previewed and downloaded here.</small></div>
+                )}
+                <section className="previewCopy"><span>Caption / final copy</span><p>{text(selectedContent.body, "No final copy has been documented yet.")}</p></section>
+                {selectedContent.brief && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
+                <dl className="contentPreviewFacts">
+                  <div><dt>Publishes</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Not scheduled"}</dd></div>
+                  <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
+                  <div><dt>Owner</dt><dd>{agentMap.get(String(selectedContent.owner_agent_id)) || "Unassigned"}</dd></div>
+                  <div><dt>Distribution</dt><dd>{text(selectedContent.distribution_mode)}</dd></div>
+                </dl>
+                <div className="previewActions">
+                  {contentDownloadUrls[String(selectedContent.id)] && <a className="liveBtn" href={contentDownloadUrls[String(selectedContent.id)]}>Download original image</a>}
+                  {selectedContent.final_url && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
+                  <button className="outlineBtn" onClick={() => openContent(selectedContent)}>Edit content</button>
+                </div>
+              </div>
+            )}
             {drawer === "content" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveContent(); }}>
                 <span className="liveLabel"><i />Content operations</span>
@@ -1132,9 +1253,9 @@ export function CommandCenter() {
                 </div>
                 <label>Publish date and time<input type="datetime-local" value={contentForm.publish_at} onChange={(event) => setContentForm({ ...contentForm, publish_at: event.target.value })} /></label>
                 <label>Final published URL<input type="url" value={contentForm.final_url} onChange={(event) => setContentForm({ ...contentForm, final_url: event.target.value })} placeholder="https://…" /></label>
-                <label>Publication screenshot
+                <label>Creative / publication image
                   <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} />
-                  <small>{selectedContent?.screenshot_path ? "Screenshot evidence is already stored. Select a new file only to replace the recorded path." : "Required when an Instagram item is marked published. Stored privately in Supabase."}</small>
+                  <small>{selectedContent?.screenshot_path ? "The original image is securely stored. Select a new file only to replace it." : "Upload the highest-quality final image. It stays private and becomes downloadable from the content preview."}</small>
                 </label>
                 <label>Failure or blocker detail<textarea value={contentForm.failure_message} onChange={(event) => setContentForm({ ...contentForm, failure_message: event.target.value })} placeholder="Required when status is Failed." /></label>
                 {selectedContent && (
