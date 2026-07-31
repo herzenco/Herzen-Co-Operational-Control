@@ -19,6 +19,23 @@ npm run dev -- --host 0.0.0.0 --port 4000
 
 The authenticated application is available at `http://localhost:4000`.
 
+## Content migration helpers
+
+These scripts help move Herzen Co. content operations out of the older Content
+Engine workflow and into the Operations Control Center.
+
+- `node scripts/import-legacy-content-state.mjs`
+  - Imports planned or scheduled items from
+    `/Users/tito/.openclaw/workspace/memory/herzenco-content-automation-state.json`
+    into OCC content records.
+- `node scripts/tomorrow-content-review-pack.mjs`
+  - Prints tomorrow's scheduled OCC content items in a review-pack format.
+
+Required environment for both scripts:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
 ## Runtime foundation
 
 A clean full-stack starter running on

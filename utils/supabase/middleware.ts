@@ -3,10 +3,30 @@ import { type NextRequest, NextResponse } from "next/server";
 
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+  const isLoginRoute =
+    request.nextUrl.pathname === "/login" ||
+    request.nextUrl.pathname === "/api/auth/login";
+  const isOperationsApi =
+    request.nextUrl.pathname === "/api/v1" ||
+    request.nextUrl.pathname.startsWith("/api/v1/");
+
+  // Allow local smoke tests and unauthenticated shells to render predictable
+  // boundaries even when project secrets are not loaded.
+  if (!supabaseUrl || !supabaseKey) {
+    if (!isLoginRoute && !isOperationsApi) {
+      const loginUrl = request.nextUrl.clone();
+      loginUrl.pathname = "/login";
+      loginUrl.search = "";
+      return NextResponse.redirect(loginUrl);
+    }
+    return supabaseResponse;
+  }
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY!,
+    supabaseUrl,
+    supabaseKey,
     {
       cookies: {
         getAll() {
@@ -34,13 +54,6 @@ export async function updateSession(request: NextRequest) {
   // Validates the JWT and refreshes expired credentials when necessary.
   const { data } = await supabase.auth.getClaims();
   const isAuthenticated = Boolean(data?.claims);
-  const isLoginRoute =
-    request.nextUrl.pathname === "/login" ||
-    request.nextUrl.pathname === "/api/auth/login";
-  const isOperationsApi =
-    request.nextUrl.pathname === "/api/v1" ||
-    request.nextUrl.pathname.startsWith("/api/v1/");
-
   // API v1 authenticates bearer tokens inside each route rather than with
   // browser cookies, so it must bypass the human-login redirect.
   if (isOperationsApi) {

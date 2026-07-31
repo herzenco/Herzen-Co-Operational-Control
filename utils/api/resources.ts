@@ -103,6 +103,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "distribution_mode", "status", "approval_required",
       "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
       "external_status", "failure_message", "research_brief", "metadata",
+      "legacy_content_item_id", "legacy_review_url", "source_system",
     ],
     updateFields: [
       "title", "brief", "body", "property_id", "channel_id", "content_type_id",
@@ -110,8 +111,12 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "distribution_mode", "status", "approval_required",
       "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
       "external_status", "failure_message", "research_brief", "metadata",
+      "legacy_content_item_id", "legacy_review_url", "source_system",
     ],
-    filters: ["property_id", "channel_id", "content_type_id", "owner_agent_id", "distribution_mode", "status"],
+    filters: [
+      "property_id", "channel_id", "content_type_id", "owner_agent_id",
+      "distribution_mode", "status", "legacy_content_item_id", "source_system",
+    ],
     defaultOrder: "created_at",
   },
   "content-status-history": {

@@ -800,7 +800,7 @@ export function CommandCenter() {
                 {text(item.status) === "approved" && <button onClick={() => openContent(item)}>{item.publish_at ? "Schedule" : "Set schedule"}</button>}
                 {text(item.status) === "scheduled" && <button onClick={() => void advanceContent(item, "publishing")}>Begin publishing</button>}
                 {["publishing", "failed"].includes(text(item.status)) && <button onClick={() => openContent(item)}>Record result</button>}
-                {text(item.status) === "published" && item.final_url && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
+                {text(item.status) === "published" && Boolean(item.final_url) && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
               </span>
             </article>
           ))}

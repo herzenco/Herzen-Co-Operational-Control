@@ -41,3 +41,23 @@ This file tracks meaningful work performed in the Operational Command Center rep
 
 - Add richer field-specific presentation for linked records if we want less raw JSON in the operator view.
 - Deploy the updated repo once the preferred production flow is confirmed.
+
+## 2026-07-31
+
+### Content migration groundwork
+
+- Created branch `Lupe` for rerouting Herzen Co. content operations into the Operations Control Center.
+- Added migration `20260731101500_legacy_content_engine_bridge.sql` so OCC content items can store:
+  - `legacy_content_item_id`
+  - `legacy_review_url`
+  - `source_system`
+- Updated the OCC content API resource definitions to accept and filter on the legacy bridge fields.
+- Updated `docs/LUPE_OPERATIONS_API.md` to document the legacy Content Engine bridge and the import pattern.
+- Updated `docs/LUPE_HANDOFF_AND_ROADMAP.md` so the next-build sequence explicitly calls for replacing the old local content-state scripts with OCC-backed workflows.
+- Added `scripts/import-legacy-content-state.mjs` to import legacy Herzen Co content schedule data from the local state file into OCC content items.
+- Added `scripts/tomorrow-content-review-pack.mjs` to generate tomorrow's review pack directly from OCC content items.
+- Updated `README.md` with the new content migration helper commands and required environment variables.
+
+### Verification
+
+- Not yet executed against live Supabase in this session because the reroute work depends on the active project credentials and target data state.

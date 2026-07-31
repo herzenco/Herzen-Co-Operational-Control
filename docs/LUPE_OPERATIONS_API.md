@@ -129,12 +129,27 @@ Supported filters:
 - Content channels: `property_id`, `platform`, `status`, `publishing_mode`
 - Content types: `slug`, `status`, `recommended_by_agent_id`
 - Content items: `property_id`, `channel_id`, `content_type_id`,
-  `owner_agent_id`, `distribution_mode`, `status`
+  `owner_agent_id`, `distribution_mode`, `status`, `legacy_content_item_id`,
+  `source_system`
 - Content status history: `content_item_id`, `from_status`, `to_status`,
   `changed_by`
 - Activity: `actor_user_id`, `action`, `entity_type`, `entity_id`
 
 ## Content operating model
+
+The Operations Control Center is the intended system of record for content
+operations. During the migration window, content items may also keep the legacy
+Herzen Content Engine identifier and review URL so older drafts and schedules
+can be reconciled here.
+
+Supported bridge fields:
+
+- `legacy_content_item_id`
+- `legacy_review_url`
+- `source_system`
+
+Use `source_system = legacy_content_engine` only when importing or reconciling
+older Content Engine records into the Control Center.
 
 The initial properties and channels are:
 
@@ -192,7 +207,8 @@ Content-Type: application/json
   "owner_agent_id": "<C-3PO uuid>",
   "research_owner_agent_id": "<K2 uuid>",
   "distribution_mode": "organic",
-  "status": "idea"
+  "status": "idea",
+  "source_system": "operations_control_center"
 }
 ```
 
@@ -227,6 +243,27 @@ Content-Type: application/json
 Screenshots belong in the private `content-publication-evidence` bucket.
 Authenticated owners/operators may upload JPEG, PNG, or WebP files up to 10 MB
 under a folder named with their Supabase user ID.
+
+### Import a legacy Content Engine item
+
+```http
+POST /api/v1/content-items
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "title": "AI Speeds Up Clear Teams, Not Confused Ones",
+  "property_id": "<Herzen Co. property uuid>",
+  "channel_id": "<Herzen Co. Website channel uuid>",
+  "owner_agent_id": "<C-3PO uuid>",
+  "distribution_mode": "organic",
+  "status": "scheduled",
+  "source_system": "legacy_content_engine",
+  "legacy_content_item_id": "41e91159-2284-4e17-aead-10c8c3adafc9",
+  "legacy_review_url": "https://content.herzenco.co/review/41e91159-2284-4e17-aead-10c8c3adafc9",
+  "publish_at": "2026-07-31T14:00:00Z"
+}
+```
 
 ## Common operations
 
