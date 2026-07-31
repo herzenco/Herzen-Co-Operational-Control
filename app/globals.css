@@ -7,3 +7,52 @@
 .roster form{margin-top:13px;padding-top:13px;border-top:1px solid var(--rule)}.signOut{width:100%;padding:8px 0;border:0;background:transparent;color:var(--muted);text-align:left;font-size:9px;letter-spacing:.16em;text-transform:uppercase}.signOut:hover{color:var(--live)}
 .companyLogin{min-height:100vh;display:grid;grid-template-columns:minmax(420px,1.1fr) minmax(420px,.9fr);background:var(--field)}.loginBrand{position:relative;display:flex;min-height:100vh;flex-direction:column;justify-content:space-between;padding:52px 58px;background:radial-gradient(circle at 78% 20%,rgba(178,116,85,.18),transparent 28%),linear-gradient(145deg,#17130e,#0f0d0a 68%);border-right:1px solid var(--rule);overflow:hidden}.loginBrand:after{content:"";position:absolute;right:-110px;bottom:70px;width:360px;height:360px;border:1px solid rgba(178,116,85,.24);border-radius:50%;box-shadow:0 0 0 55px rgba(178,116,85,.035),0 0 0 110px rgba(178,116,85,.025)}.loginBrand>img{width:175px;height:auto}.loginBrand>div{position:relative;z-index:1;max-width:620px}.loginBrand span,.loginEyebrow{display:block;margin-bottom:18px;color:var(--live);font-size:10px;letter-spacing:.24em;text-transform:uppercase}.loginBrand h1{font:300 clamp(42px,5vw,72px)/1.02 var(--serif);letter-spacing:-.02em}.loginBrand p{max-width:470px;margin-top:24px;color:var(--dim);font-size:14px;line-height:1.7}.loginBrand>small{position:relative;z-index:1;color:var(--muted);font-size:9px;letter-spacing:.18em;text-transform:uppercase}.loginPanel{display:grid;place-items:center;padding:42px}.loginCard{width:min(420px,100%)}.loginCard h2{font:300 34px/1.1 var(--serif)}.loginCard>p{margin:12px 0 28px;color:var(--dim);font-size:12px}.loginCard form{display:grid;gap:18px}.loginCard label{display:grid;gap:8px;color:var(--dim);font-size:9px;letter-spacing:.16em;text-transform:uppercase}.loginCard input{height:48px;padding:0 14px;border:1px solid var(--rule);border-radius:2px;outline:0;background:var(--panel);color:var(--paper);font-size:13px;letter-spacing:normal;text-transform:none}.loginCard input:focus{border-color:var(--live);box-shadow:0 0 0 3px rgba(178,116,85,.12)}.loginCard form button{height:48px;margin-top:4px;border:1px solid var(--live);border-radius:2px;background:var(--live);color:#fff;font-size:9px;letter-spacing:.18em;text-transform:uppercase}.loginCard form button:hover{background:#8f593f}.loginError{margin:-7px 0 22px;padding:12px 14px;border-left:2px solid var(--live);background:rgba(178,116,85,.1);color:#d9c1b4;font-size:11px;line-height:1.5}.loginHelp{display:block;margin-top:22px;color:var(--muted);font-size:9px;line-height:1.6}.loginHelp:before{content:"";display:inline-block;width:5px;height:5px;margin:0 8px 1px 0;border-radius:50%;background:var(--live)}
 @media(max-width:850px){.companyLogin{grid-template-columns:1fr}.loginBrand{min-height:42vh;padding:34px 28px}.loginBrand h1{font-size:42px}.loginBrand p{display:none}.loginBrand>small{margin-top:50px}.loginPanel{padding:54px 28px}}
+
+.opsShell{min-height:100vh;display:grid;grid-template-columns:236px 1fr;background:var(--field)}
+.opsRail{position:fixed;inset:0 auto 0 0;width:236px;display:flex;flex-direction:column;background:var(--rail);border-right:1px solid var(--rule);z-index:10}
+.opsIdentity{padding:18px 22px;display:grid;gap:5px;border-bottom:1px solid var(--rule)}
+.opsIdentity strong{font-size:15px;font-weight:500}
+.opsIdentity small{color:var(--muted);font-size:10px;letter-spacing:.14em;text-transform:uppercase}
+.opsNav{padding:14px 12px;display:grid;gap:2px}
+.opsNav button{display:grid;grid-template-columns:1fr auto;align-items:center;gap:12px;padding:11px 10px;border:0;border-radius:2px;background:transparent;color:var(--dim);text-align:left;text-transform:uppercase;font-size:11px;letter-spacing:.1em}
+.opsNav button:hover,.opsNav button.active{background:var(--panel2);color:var(--paper)}
+.opsNav em{font-style:normal;color:var(--muted)}
+.opsStats{margin-top:auto;padding:18px 22px;display:grid;gap:12px;border-top:1px solid var(--rule)}
+.opsStats div{padding:12px;border:1px solid var(--soft);background:rgba(245,239,228,.02)}
+.opsStats span{display:block;color:var(--muted);font-size:9px;letter-spacing:.16em;text-transform:uppercase}
+.opsStats strong{display:block;margin-top:8px;font:300 20px var(--serif)}
+.opsSignOut{padding:0 22px 22px}
+.opsMain{grid-column:2;min-width:0}
+.opsHeader{position:sticky;top:0;z-index:8;display:grid;grid-template-columns:1fr auto;gap:18px 28px;padding:20px 30px;border-bottom:1px solid var(--rule);background:rgba(16,14,10,.93);backdrop-filter:blur(10px)}
+.opsToolbar{display:flex;gap:10px;align-items:start;padding-top:4px}
+.opsBody{padding:26px 30px 60px}
+.opsMetricDeck{margin-bottom:22px}
+.opsGrid{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(360px,1fr);gap:22px}
+.opsListPanel,.opsDetailPanel{min-height:600px}
+.opsList{display:grid;gap:12px;padding:18px}
+.opsCard{border:1px solid var(--soft);background:rgba(245,239,228,.02)}
+.opsCardMain{width:100%;padding:16px;border:0;background:transparent;color:var(--paper);text-align:left}
+.opsCardMain:hover{background:var(--panel2)}
+.opsCardTitle{display:flex;justify-content:space-between;gap:14px;align-items:start;margin-bottom:14px}
+.opsCardTitle strong{font-size:14px;font-weight:500;line-height:1.4}
+.opsCardTitle small{color:var(--live);font-size:9px;letter-spacing:.14em;text-transform:uppercase}
+.opsMeta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px 14px;margin:0}
+.opsMeta div{display:grid;gap:4px}
+.opsMeta dt{color:var(--muted);font-size:8px;letter-spacing:.14em;text-transform:uppercase}
+.opsMeta dd{margin:0;color:var(--dim);font-size:11px;line-height:1.45;white-space:pre-wrap;word-break:break-word}
+.opsCardActions{display:flex;gap:10px;padding:0 16px 16px}
+.dangerBtn{height:38px;padding:0 16px;border:1px solid #a84c43;border-radius:2px;background:transparent;color:#df9d95;text-transform:uppercase;font-size:9px;letter-spacing:.14em}
+.dangerBtn:hover{background:#5b211b;color:#fff5f1}
+.opsForm{display:grid;gap:14px;padding:18px}
+.opsForm label{display:grid;gap:6px;color:var(--dim);font-size:9px;letter-spacing:.12em;text-transform:uppercase}
+.opsForm input,.opsForm textarea,.opsForm select{width:100%;padding:11px;border:1px solid var(--rule);border-radius:2px;outline:0;background:var(--field);color:var(--paper);font-size:11px;letter-spacing:normal;text-transform:none}
+.opsForm input:focus,.opsForm textarea:focus,.opsForm select:focus{border-color:var(--live);box-shadow:0 0 0 2px rgba(178,116,85,.15)}
+.opsForm textarea{min-height:110px;resize:vertical}
+.opsForm small{color:var(--muted);font-size:9px;line-height:1.5;letter-spacing:normal;text-transform:none}
+.opsFormActions{display:flex;justify-content:flex-end;gap:10px;padding-top:8px}
+.opsInspect{margin:0;padding:18px;color:var(--dim);font-size:11px;line-height:1.6;white-space:pre-wrap;word-break:break-word}
+.opsEmpty{padding:26px 18px;color:var(--muted);font-size:12px}
+.opsEmptyDetail{padding:40px 18px}
+.opsError{margin-bottom:18px;padding:14px 16px;border-left:2px solid #c96b5c;background:rgba(201,107,92,.12);color:#e8c0b9;font-size:11px;line-height:1.55}
+@media(max-width:1100px){.opsGrid{grid-template-columns:1fr}.opsToolbar{grid-column:1/-1}.opsHeader{grid-template-columns:1fr}}
+@media(max-width:760px){.opsShell{display:block}.opsRail{display:none}.opsMain{display:block}.opsHeader{position:relative;padding:20px}.opsToolbar{flex-wrap:wrap}.opsBody{padding:20px}.opsGrid{display:block}.opsDetailPanel{margin-top:18px}.opsMeta{grid-template-columns:1fr}.opsCardActions{flex-wrap:wrap}}

@@ -1,191 +1,788 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
+import type { Session } from "@supabase/supabase-js";
+import { createClient } from "../utils/supabase/client";
 
-type AgentId = "lupe" | "d8a" | "c3po" | "k2" | "rex";
-type Status = "Inbox" | "In progress" | "Review" | "Done";
-type View = "command" | "list" | "kanban" | "calendar" | "approvals";
-type Drawer = AgentId | "new" | "brief" | null;
+type ResourceName =
+  | "agents"
+  | "projects"
+  | "tasks"
+  | "work-logs"
+  | "daily-updates"
+  | "approvals"
+  | "activity";
 
-type Agent = {
-  id: AgentId; name: string; lane: string; role: string; focus: string;
-  reported: boolean; last: string; charter: string;
+type FieldKind = "text" | "textarea" | "select" | "date" | "json" | "list";
+
+type FieldConfig = {
+  name: string;
+  label: string;
+  kind: FieldKind;
+  options?: Array<{ value: string; label: string }>;
+  placeholder?: string;
+  helper?: string;
 };
 
-type Task = {
-  id: number; title: string; project: string; owner: AgentId; status: Status;
-  priority: "High" | "Medium" | "Low"; due: string; day: number; note: string;
-  review: string; approval: string;
+type ResourceConfig = {
+  name: ResourceName;
+  label: string;
+  description: string;
+  mutable: boolean;
+  singular: string;
+  fields: FieldConfig[];
 };
 
-const agents: Agent[] = [
-  { id: "lupe", name: "Lupe", lane: "Operations", role: "Main operator", focus: "Week 31 brief · dependency map", reported: true, last: "12 min ago", charter: "Turns Tito’s direction into instructions, watches every lane for drift, and owns the daily brief." },
-  { id: "d8a", name: "D8-A", lane: "Product + technical ops", role: "Skydeo owner", focus: "Skydeo 2.4 release readiness", reported: true, last: "28 min ago", charter: "Owns Skydeo execution, release readiness, onboarding, technical operations, and documentation." },
-  { id: "c3po", name: "C-3PO", lane: "Content + social", role: "Calendar owner", focus: "August calendar · 18 posts", reported: true, last: "1 hr ago", charter: "Runs publishing: the calendar, platform coordination, campaign sequencing, and production status." },
-  { id: "k2", name: "K2", lane: "Research + optimization", role: "Quality gate", focus: "Keyword pass · approval evidence", reported: true, last: "42 min ago", charter: "Researches, optimizes, and signs off before applicable packages reach Tito." },
-  { id: "rex", name: "Rex", lane: "Paid media", role: "Paid media specialist", focus: "Prospecting test 04 · budget pacing", reported: false, last: "Yesterday", charter: "Owns paid acquisition, campaign structure, creative tests, pacing, and optimization." },
-];
-
-const initialTasks: Task[] = [
-  { id: 1, title: "Finalize Q3 operating roadmap", project: "Herzen Co.", owner: "lupe", status: "In progress", priority: "High", due: "Today", day: 30, note: "Consolidate every lane and flag dependencies.", review: "Internal", approval: "None" },
-  { id: 2, title: "Release readiness pass for Skydeo 2.4", project: "Skydeo", owner: "d8a", status: "Review", priority: "High", due: "Tomorrow", day: 31, note: "Migration rehearsed twice. One open question on the agent API rate limit.", review: "Ready", approval: "Queued" },
-  { id: 3, title: "Lock the August content calendar — 18 posts", project: "Content", owner: "c3po", status: "Review", priority: "High", due: "Today · noon", day: 30, note: "Four platforms, three themes. K2 signed the evidence pack.", review: "Signed", approval: "Queued" },
-  { id: 4, title: "Competitor hook and keyword research", project: "Growth", owner: "k2", status: "In progress", priority: "Medium", due: "Tomorrow", day: 31, note: "Eleven terms remain after the quality pass.", review: "None", approval: "None" },
-  { id: 5, title: "Refresh prospecting creative tests", project: "Paid media", owner: "rex", status: "Inbox", priority: "Medium", due: "Aug 1", day: 1, note: "Test 04 needs one more week before a budget decision.", review: "Pending", approval: "None" },
-  { id: 6, title: "Document the agent API in Skydeo docs", project: "Skydeo", owner: "d8a", status: "Inbox", priority: "Medium", due: "Aug 4", day: 4, note: "Blocks external agents from reading their own instructions.", review: "None", approval: "None" },
-  { id: 7, title: "Package weekly performance brief", project: "Growth", owner: "k2", status: "Inbox", priority: "Medium", due: "Aug 3", day: 3, note: "Include evidence and recommended action.", review: "None", approval: "None" },
-  { id: 8, title: "Schedule founder story sequence", project: "Content", owner: "c3po", status: "In progress", priority: "Medium", due: "Aug 2", day: 2, note: "Seven frames drafted. One proof point is outstanding.", review: "Pending", approval: "None" },
-  { id: 9, title: "Audit campaign naming system", project: "Paid media", owner: "rex", status: "Done", priority: "Low", due: "Jul 29", day: 29, note: "Convention documented and applied.", review: "Complete", approval: "None" },
-];
-
-const approvals = [
-  { id: "AP-031", title: "Publish the August content calendar as locked", owner: "C-3PO", due: "Today · 12:00", signed: "K2 signed", summary: "Eighteen posts across four platforms. Scheduling must begin before the Skydeo 2.4 freeze.", risk: "A late decision compresses production and misses the first August window." },
-  { id: "AP-032", title: "Ship Skydeo 2.4 on Thursday", owner: "D8-A", due: "Today · 16:00", signed: "K2 pending", summary: "Two clean migration rehearsals at 41 seconds. One unresolved API rate-limit question remains.", risk: "The rate limit may constrain research agents after launch." },
-  { id: "AP-033", title: "Increase prospecting budget by 20%", owner: "Rex", due: "Friday", signed: "K2 withheld", summary: "Test 04 is directionally positive but has not completed a full week.", risk: "Increasing now would outrun the evidence." },
-];
-
-const statusOrder: Status[] = ["Inbox", "In progress", "Review", "Done"];
-const viewMeta: Record<View, [string, string, string]> = {
-  command: ["Live operation", "Command center", "Thursday 30 July · 10:24 · five lanes reporting"],
-  list: ["All work", "Instruction ledger", "Every instruction, owner, review, and approval state."],
-  kanban: ["Workflow", "Instruction to outcome", "Move work through the operating process."],
-  calendar: ["Timeline", "Week 31", "Deadlines, publishing, reviews, and decisions on one line."],
-  approvals: ["Decision desk", "Awaiting you", "Evidence packaged. Consequences made explicit."],
+type Viewer = {
+  display_name: string;
+  role: string;
 };
 
-const calendar = [
-  { dow: "Mon", date: 27 }, { dow: "Tue", date: 28 }, { dow: "Wed", date: 29 },
-  { dow: "Thu", date: 30 }, { dow: "Fri", date: 31 }, { dow: "Sat", date: 1 }, { dow: "Sun", date: 2 },
-  { dow: "Mon", date: 3 }, { dow: "Tue", date: 4 }, { dow: "Wed", date: 5 },
-  { dow: "Thu", date: 6 }, { dow: "Fri", date: 7 }, { dow: "Sat", date: 8 }, { dow: "Sun", date: 9 },
+type OverviewCounts = {
+  agents: number;
+  projects: number;
+  tasks: number;
+  open_tasks: number;
+  pending_approvals: number;
+};
+
+type OverviewData = {
+  viewer: Viewer;
+  agents: Record<string, unknown>[];
+  projects: Record<string, unknown>[];
+  tasks: Record<string, unknown>[];
+  counts: OverviewCounts;
+};
+
+type CollectionResponse = {
+  data: {
+    items: Record<string, unknown>[];
+    count: number;
+    limit: number;
+    offset: number;
+  };
+};
+
+type ApiError = {
+  error?: {
+    message?: string;
+  };
+};
+
+type FormState = Record<string, string>;
+
+const RESOURCE_CONFIGS: ResourceConfig[] = [
+  {
+    name: "agents",
+    label: "Agents",
+    singular: "agent",
+    description: "Roster, permissions mapping, reporting lines, and operating scope.",
+    mutable: true,
+    fields: [
+      { name: "code", label: "Code", kind: "text", placeholder: "c3po" },
+      { name: "name", label: "Name", kind: "text", placeholder: "C-3PO" },
+      { name: "role", label: "Role", kind: "text", placeholder: "Content operator" },
+      { name: "lane", label: "Lane", kind: "text", placeholder: "Content" },
+      {
+        name: "status",
+        label: "Status",
+        kind: "select",
+        options: [
+          { value: "active", label: "Active" },
+          { value: "paused", label: "Paused" },
+          { value: "retired", label: "Retired" },
+        ],
+      },
+      { name: "charter", label: "Charter", kind: "textarea" },
+      { name: "instructions", label: "Instructions", kind: "textarea" },
+      { name: "capabilities", label: "Capabilities", kind: "list", helper: "One item per line." },
+      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
+      { name: "auth_user_id", label: "Auth User ID", kind: "text" },
+      { name: "reports_to", label: "Reports To", kind: "select" },
+    ],
+  },
+  {
+    name: "projects",
+    label: "Projects",
+    singular: "project",
+    description: "Operating initiatives, ownership, objectives, and project status.",
+    mutable: true,
+    fields: [
+      { name: "name", label: "Name", kind: "text" },
+      { name: "slug", label: "Slug", kind: "text", placeholder: "operational-command-center" },
+      { name: "description", label: "Description", kind: "textarea" },
+      {
+        name: "status",
+        label: "Status",
+        kind: "select",
+        options: [
+          { value: "planned", label: "Planned" },
+          { value: "active", label: "Active" },
+          { value: "paused", label: "Paused" },
+          { value: "completed", label: "Completed" },
+          { value: "archived", label: "Archived" },
+        ],
+      },
+      { name: "owner_agent_id", label: "Owner Agent", kind: "select" },
+      { name: "objectives", label: "Objectives", kind: "list", helper: "One objective per line." },
+      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
+    ],
+  },
+  {
+    name: "tasks",
+    label: "Tasks",
+    singular: "task",
+    description: "Instructions, ownership, due dates, dependencies, and definitions of done.",
+    mutable: true,
+    fields: [
+      { name: "title", label: "Title", kind: "text" },
+      { name: "description", label: "Description", kind: "textarea" },
+      { name: "project_id", label: "Project", kind: "select" },
+      { name: "owner_agent_id", label: "Owner Agent", kind: "select" },
+      {
+        name: "status",
+        label: "Status",
+        kind: "select",
+        options: [
+          { value: "inbox", label: "Inbox" },
+          { value: "in_progress", label: "In Progress" },
+          { value: "blocked", label: "Blocked" },
+          { value: "review", label: "Review" },
+          { value: "done", label: "Done" },
+          { value: "cancelled", label: "Cancelled" },
+        ],
+      },
+      {
+        name: "priority",
+        label: "Priority",
+        kind: "select",
+        options: [
+          { value: "urgent", label: "Urgent" },
+          { value: "high", label: "High" },
+          { value: "medium", label: "Medium" },
+          { value: "low", label: "Low" },
+        ],
+      },
+      { name: "due_at", label: "Due At", kind: "date" },
+      { name: "definition_of_done", label: "Definition Of Done", kind: "textarea" },
+      { name: "dependencies", label: "Dependencies", kind: "list", helper: "One dependency per line." },
+      { name: "tags", label: "Tags", kind: "list", helper: "One tag per line." },
+      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
+    ],
+  },
+  {
+    name: "work-logs",
+    label: "Work Logs",
+    singular: "work log",
+    description: "Progress notes, decisions, blockers, evidence, and deliverables.",
+    mutable: true,
+    fields: [
+      { name: "task_id", label: "Task", kind: "select" },
+      { name: "agent_id", label: "Agent", kind: "select" },
+      {
+        name: "entry_type",
+        label: "Entry Type",
+        kind: "select",
+        options: [
+          { value: "note", label: "Note" },
+          { value: "progress", label: "Progress" },
+          { value: "decision", label: "Decision" },
+          { value: "blocker", label: "Blocker" },
+          { value: "deliverable", label: "Deliverable" },
+          { value: "evidence", label: "Evidence" },
+        ],
+      },
+      { name: "title", label: "Title", kind: "text" },
+      { name: "body", label: "Body", kind: "textarea" },
+      { name: "artifacts", label: "Artifacts", kind: "json", helper: "Use JSON for structured links and attachments." },
+      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
+    ],
+  },
+  {
+    name: "daily-updates",
+    label: "Daily Updates",
+    singular: "daily update",
+    description: "Daily state by agent, including blockers, next steps, and health.",
+    mutable: true,
+    fields: [
+      { name: "agent_id", label: "Agent", kind: "select" },
+      { name: "update_date", label: "Update Date", kind: "date" },
+      { name: "summary", label: "Summary", kind: "textarea" },
+      { name: "completed", label: "Completed", kind: "list", helper: "One item per line." },
+      { name: "blockers", label: "Blockers", kind: "list", helper: "One item per line." },
+      { name: "next_steps", label: "Next Steps", kind: "list", helper: "One item per line." },
+      { name: "asks", label: "Asks", kind: "list", helper: "One item per line." },
+      {
+        name: "health",
+        label: "Health",
+        kind: "select",
+        options: [
+          { value: "on_track", label: "On Track" },
+          { value: "at_risk", label: "At Risk" },
+          { value: "blocked", label: "Blocked" },
+        ],
+      },
+    ],
+  },
+  {
+    name: "approvals",
+    label: "Approvals",
+    singular: "approval",
+    description: "Decision packages for Tito with evidence, risk, and recommendation.",
+    mutable: true,
+    fields: [
+      { name: "task_id", label: "Task", kind: "select" },
+      { name: "project_id", label: "Project", kind: "select" },
+      { name: "requested_by_agent_id", label: "Requested By", kind: "select" },
+      { name: "reviewer_agent_id", label: "Reviewer", kind: "select" },
+      { name: "title", label: "Title", kind: "text" },
+      { name: "summary", label: "Summary", kind: "textarea" },
+      { name: "evidence", label: "Evidence", kind: "list", helper: "One proof point per line." },
+      { name: "risk", label: "Risk", kind: "textarea" },
+      { name: "recommendation", label: "Recommendation", kind: "textarea" },
+      {
+        name: "status",
+        label: "Status",
+        kind: "select",
+        options: [
+          { value: "pending", label: "Pending" },
+          { value: "approved", label: "Approved" },
+          { value: "changes_requested", label: "Changes Requested" },
+          { value: "declined", label: "Declined" },
+          { value: "withdrawn", label: "Withdrawn" },
+        ],
+      },
+      { name: "decision_note", label: "Decision Note", kind: "textarea" },
+      { name: "due_at", label: "Due At", kind: "date" },
+    ],
+  },
+  {
+    name: "activity",
+    label: "Activity",
+    singular: "activity event",
+    description: "Immutable audit trail of inserts, updates, and deletes.",
+    mutable: false,
+    fields: [],
+  },
 ];
 
-function AgentMark({ id, large = false }: { id: AgentId; large?: boolean }) {
-  const agent = agents.find(a => a.id === id)!;
-  return <span className={`agentMark ${large ? "large" : ""}`}>{agent.name.slice(0, 2).toUpperCase()}</span>;
+const EMPTY_COUNTS: OverviewCounts = {
+  agents: 0,
+  projects: 0,
+  tasks: 0,
+  open_tasks: 0,
+  pending_approvals: 0,
+};
+
+function formatLabel(value: string) {
+  return value
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function stringifyValue(value: unknown) {
+  if (value === null || value === undefined || value === "") return "—";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return JSON.stringify(value, null, 2);
+}
+
+function defaultFormState(config: ResourceConfig, record?: Record<string, unknown>): FormState {
+  return Object.fromEntries(
+    config.fields.map((field) => {
+      const value = record?.[field.name];
+      if (value === null || value === undefined) return [field.name, ""];
+      if (field.kind === "json") return [field.name, JSON.stringify(value, null, 2)];
+      if (field.kind === "list") return [field.name, Array.isArray(value) ? value.join("\n") : String(value)];
+      if (field.kind === "date") return [field.name, typeof value === "string" ? value.slice(0, 16) : ""];
+      return [field.name, String(value)];
+    }),
+  );
+}
+
+function toPayload(config: ResourceConfig, form: FormState) {
+  const payload: Record<string, unknown> = {};
+
+  for (const field of config.fields) {
+    const rawValue = (form[field.name] || "").trim();
+    if (!rawValue) continue;
+
+    if (field.kind === "json") {
+      payload[field.name] = JSON.parse(rawValue);
+      continue;
+    }
+
+    if (field.kind === "list") {
+      payload[field.name] = rawValue
+        .split("\n")
+        .map((item) => item.trim())
+        .filter(Boolean);
+      continue;
+    }
+
+    if (field.kind === "date") {
+      payload[field.name] = new Date(rawValue).toISOString();
+      continue;
+    }
+
+    payload[field.name] = rawValue;
+  }
+
+  return payload;
+}
+
+function fieldOptions(
+  field: FieldConfig,
+  overview: OverviewData | null,
+): Array<{ value: string; label: string }> | undefined {
+  if (field.options) return field.options;
+  if (!overview) return undefined;
+
+  if (["reports_to", "owner_agent_id", "agent_id", "requested_by_agent_id", "reviewer_agent_id"].includes(field.name)) {
+    return overview.agents.map((agent) => ({
+      value: String(agent.id),
+      label: String(agent.name || agent.code || agent.id),
+    }));
+  }
+
+  if (field.name === "project_id") {
+    return overview.projects.map((project) => ({
+      value: String(project.id),
+      label: String(project.name || project.slug || project.id),
+    }));
+  }
+
+  if (field.name === "task_id") {
+    return overview.tasks.map((task) => ({
+      value: String(task.id),
+      label: String(task.title || task.id),
+    }));
+  }
+
+  return undefined;
+}
+
+function sortByCreatedAt(records: Record<string, unknown>[]) {
+  return [...records].sort((left, right) =>
+    String(right.created_at || "").localeCompare(String(left.created_at || "")),
+  );
 }
 
 export function CommandCenter() {
-  const [view, setView] = useState<View>("command");
-  const [lane, setLane] = useState<AgentId | "all">("all");
+  const supabase = useMemo(() => createClient(), []);
+  const [resource, setResource] = useState<ResourceName>("tasks");
+  const [session, setSession] = useState<Session | null>(null);
+  const [overview, setOverview] = useState<OverviewData | null>(null);
+  const [records, setRecords] = useState<Record<string, unknown>[]>([]);
   const [query, setQuery] = useState("");
-  const [tasks, setTasks] = useState(initialTasks);
-  const [drawer, setDrawer] = useState<Drawer>(null);
-  const [decisions, setDecisions] = useState<Record<string, string>>({});
-  const [dragId, setDragId] = useState<number | null>(null);
+  const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
+  const [drawerMode, setDrawerMode] = useState<"create" | "edit" | null>(null);
+  const [form, setForm] = useState<FormState>({});
+  const [error, setError] = useState<string>("");
+  const [busy, startTransition] = useTransition();
+  const deferredQuery = useDeferredValue(query);
+  const config = RESOURCE_CONFIGS.find((item) => item.name === resource)!;
 
-  const filtered = useMemo(() => tasks.filter(t => {
-    const q = query.toLowerCase();
-    return (lane === "all" || t.owner === lane) && (!q || `${t.title} ${t.project}`.toLowerCase().includes(q));
-  }), [tasks, lane, query]);
-  const activeAgent = agents.find(a => a.id === drawer);
-  const meta = viewMeta[view];
+  useEffect(() => {
+    let cancelled = false;
 
-  function advance(id: number) {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status: statusOrder[(statusOrder.indexOf(t.status) + 1) % statusOrder.length] } : t));
+    async function loadSession() {
+      const { data } = await supabase.auth.getSession();
+      if (cancelled) return;
+
+      if (!data.session) {
+        window.location.href = "/login";
+        return;
+      }
+
+      setSession(data.session);
+    }
+
+    void loadSession();
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      setSession(nextSession);
+      if (!nextSession) window.location.href = "/login";
+    });
+
+    return () => {
+      cancelled = true;
+      subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  useEffect(() => {
+    if (!session) return;
+
+    startTransition(() => {
+      void refreshOverview(session.access_token);
+      void refreshResource(session.access_token, resource);
+    });
+  }, [resource, session]);
+
+  async function apiFetch(path: string, init?: RequestInit) {
+    if (!session?.access_token) throw new Error("Your session expired. Sign in again.");
+
+    const response = await fetch(path, {
+      ...init,
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${session.access_token}`,
+        ...(init?.headers || {}),
+      },
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as ApiError | null;
+      throw new Error(body?.error?.message || `Request failed with status ${response.status}.`);
+    }
+
+    return response.json();
   }
-  function move(id: number, status: Status) {
-    setTasks(prev => prev.map(t => t.id === id ? { ...t, status } : t));
-  }
-  function addTask(form: FormData) {
-    const title = String(form.get("title") || "").trim();
-    if (!title) return;
-    setTasks(prev => [{ id: Date.now(), title, project: String(form.get("project")), owner: form.get("agent") as AgentId, status: "Inbox", priority: form.get("priority") as Task["priority"], due: "In 2 days", day: 1, note: String(form.get("dod") || form.get("context") || "Awaiting acknowledgement."), review: form.get("signoff") ? "Required" : "None", approval: "None" }, ...prev]);
-    setDrawer(null); setView("kanban");
+
+  async function refreshOverview(accessToken: string) {
+    const response = await fetch("/api/v1/overview", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as ApiError | null;
+      throw new Error(body?.error?.message || "Could not load the operations overview.");
+    }
+
+    const payload = await response.json();
+    setOverview(payload.data as OverviewData);
   }
 
-  return <div className="deck">
-    <aside className="rail">
-      <div className="deckBrand"><img src="/herzen-logo-white.png" alt="Herzen Co." /><span>Operations control</span></div>
-      <div className="rule" />
-      <nav className="deckNav">
-        {([["command", "Command"], ["list", "List"], ["kanban", "Kanban"], ["calendar", "Calendar"], ["approvals", "Approvals"]] as [View, string][]).map(([id, label]) =>
-          <button key={id} className={view === id ? "active" : ""} onClick={() => setView(id)}><i /><span>{label}</span><em>{id === "list" ? tasks.length : id === "approvals" ? approvals.filter(a => !decisions[a.id]).length : ""}</em></button>
-        )}
-      </nav>
-      <div className="roster">
-        <div className="railLabel">Roster</div>
-        {agents.map(a => <button key={a.id} onClick={() => setDrawer(a.id)}><AgentMark id={a.id} /><span>{a.name}</span><i className={a.reported ? "online" : ""} /></button>)}
-        <p>Operator on duty<br /><b>Lupe</b></p>
-        <form action="/api/auth/logout" method="post">
-          <button className="signOut" type="submit">Sign out</button>
-        </form>
-      </div>
-    </aside>
+  async function refreshResource(accessToken: string, nextResource: ResourceName) {
+    const response = await fetch(`/api/v1/${nextResource}?limit=200&offset=0`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-    <main className="deckMain">
-      <header className="deckHeader">
-        <div className="titleBlock"><span className="liveLabel"><i />{meta[0]}</span><h1>{meta[1]}</h1><p>{meta[2]}</p></div>
-        <div className="headerActions">
-          <label className="deckSearch"><span>/</span><input value={query} onChange={e => setQuery(e.target.value)} placeholder="Search work or project" /></label>
-          <button className="outlineBtn" onClick={() => setDrawer("brief")}>Daily brief</button>
-          <button className="liveBtn" onClick={() => setDrawer("new")}>New instruction</button>
+    if (!response.ok) {
+      const body = (await response.json().catch(() => null)) as ApiError | null;
+      throw new Error(body?.error?.message || `Could not load ${nextResource}.`);
+    }
+
+    const payload = (await response.json()) as CollectionResponse;
+    setRecords(sortByCreatedAt(payload.data.items));
+  }
+
+  function openCreateDrawer() {
+    setSelected(null);
+    setForm(defaultFormState(config));
+    setDrawerMode("create");
+    setError("");
+  }
+
+  function openEditDrawer(record: Record<string, unknown>) {
+    setSelected(record);
+    setForm(defaultFormState(config, record));
+    setDrawerMode("edit");
+    setError("");
+  }
+
+  function inspectRecord(record: Record<string, unknown>) {
+    setSelected(record);
+    setDrawerMode(null);
+    setForm({});
+    setError("");
+  }
+
+  function closeDrawer() {
+    setDrawerMode(null);
+    setSelected(null);
+    setForm({});
+    setError("");
+  }
+
+  async function handleSave() {
+    try {
+      setError("");
+      const payload = toPayload(config, form);
+      const path = drawerMode === "edit" && selected?.id
+        ? `/api/v1/${resource}/${selected.id}`
+        : `/api/v1/${resource}`;
+
+      await apiFetch(path, {
+        method: drawerMode === "edit" ? "PATCH" : "POST",
+        body: JSON.stringify(payload),
+      });
+
+      if (!session?.access_token) return;
+      await refreshOverview(session.access_token);
+      await refreshResource(session.access_token, resource);
+      closeDrawer();
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "The record could not be saved.");
+    }
+  }
+
+  async function handleDelete(record: Record<string, unknown>) {
+    if (!config.mutable || !record.id) return;
+    const confirmed = window.confirm(`Delete this ${config.singular}? This cannot be undone from the UI.`);
+    if (!confirmed) return;
+
+    try {
+      setError("");
+      await apiFetch(`/api/v1/${resource}/${record.id}`, { method: "DELETE" });
+      if (!session?.access_token) return;
+      await refreshOverview(session.access_token);
+      await refreshResource(session.access_token, resource);
+      if (selected?.id === record.id) closeDrawer();
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "The record could not be deleted.");
+    }
+  }
+
+  const filteredRecords = useMemo(() => {
+    const needle = deferredQuery.trim().toLowerCase();
+    if (!needle) return records;
+
+    return records.filter((record) =>
+      JSON.stringify(record).toLowerCase().includes(needle),
+    );
+  }, [deferredQuery, records]);
+
+  return (
+    <div className="opsShell">
+      <aside className="opsRail">
+        <div className="deckBrand">
+          <img src="/herzen-logo-white.png" alt="Herzen Co." />
+          <span>Operational Command Center</span>
         </div>
-        <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map(a => <button key={a.id} className={lane === a.id ? "active" : ""} onClick={() => setLane(a.id)}>{a.name}</button>)}</div>
-      </header>
+        <div className="rule" />
 
-      <div className="deckContent">
-        {view === "command" && <div className="commandView">
-          <div className="metricDeck">
-            {[
-              ["Active work", tasks.filter(t => t.status === "In progress").length, "Two moved today"],
-              ["Awaiting review", tasks.filter(t => t.status === "Review").length, "One K2 sign-off pending"],
-              ["Awaiting you", approvals.filter(a => !decisions[a.id]).length, "Decisions, nothing else"],
-              ["Reported", `${agents.filter(a => a.reported).length}/5`, "Rex is quiet"],
-            ].map(([label, value, note]) => <div key={label}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>)}
+        <div className="opsIdentity">
+          <span className="railLabel">Operator</span>
+          <strong>{overview?.viewer.display_name || "Lupe"}</strong>
+          <small>{overview?.viewer.role || "operator"}</small>
+        </div>
+
+        <nav className="opsNav">
+          {RESOURCE_CONFIGS.map((item) => (
+            <button
+              key={item.name}
+              className={item.name === resource ? "active" : ""}
+              onClick={() => {
+                setQuery("");
+                setResource(item.name);
+              }}
+            >
+              <span>{item.label}</span>
+              <em>{item.name === "tasks" ? overview?.counts.tasks ?? records.length : item.name === "agents" ? overview?.counts.agents ?? records.length : ""}</em>
+            </button>
+          ))}
+        </nav>
+
+        <div className="opsStats">
+          <div>
+            <span>Open tasks</span>
+            <strong>{overview?.counts.open_tasks ?? EMPTY_COUNTS.open_tasks}</strong>
           </div>
-          <div className="commandGrid">
-            <section className="deckPanel teamPanel">
-              <div className="panelHead"><div><span>Team status</span><h2>Who is on what, right now</h2></div><small>4 of 5 reported</small></div>
-              {agents.map(a => <button className="teamRow" key={a.id} onClick={() => setDrawer(a.id)}><AgentMark id={a.id} large /><span className="agentIdentity"><b>{a.name}</b><small>{a.lane}</small></span><span className="agentFocus">{a.focus}</span><strong>{tasks.filter(t => t.owner === a.id && t.status !== "Done").length}</strong><span className="reportState"><b className={a.reported ? "" : "missing"}>{a.reported ? "Submitted" : "Not submitted"}</b><small>{a.last}</small></span></button>)}
-            </section>
-            <div className="sideStack">
-              <section className="deckPanel">
-                <div className="panelHead"><div><span>Awaiting you</span><h2>Decisions, nothing else</h2></div></div>
-                {approvals.filter(a => !decisions[a.id]).map(a => <button className="decisionRow" key={a.id} onClick={() => setView("approvals")}><b>{a.title}</b><small>{a.owner} · <i>{a.due}</i> · {a.signed}</small></button>)}
-                <button className="textLink" onClick={() => setView("approvals")}>Open approval queue →</button>
-              </section>
-              <section className="deckPanel">
-                <div className="panelHead"><div><span className="dim">Due today</span><h2>{tasks.filter(t => t.due.includes("Today") && t.status !== "Done").length} commitments</h2></div></div>
-                {tasks.filter(t => t.due.includes("Today") && t.status !== "Done").map(t => <div className="dueRow" key={t.id}><i /><span><b>{t.title}</b><small>{agents.find(a => a.id === t.owner)?.name} · {t.project}</small></span></div>)}
-              </section>
+          <div>
+            <span>Pending approvals</span>
+            <strong>{overview?.counts.pending_approvals ?? EMPTY_COUNTS.pending_approvals}</strong>
+          </div>
+          <div>
+            <span>Projects</span>
+            <strong>{overview?.counts.projects ?? EMPTY_COUNTS.projects}</strong>
+          </div>
+        </div>
+
+        <form action="/api/auth/logout" method="post" className="opsSignOut">
+          <button type="submit" className="signOut">Sign out</button>
+        </form>
+      </aside>
+
+      <main className="opsMain">
+        <header className="opsHeader">
+          <div className="titleBlock">
+            <span className="liveLabel"><i />Live operations</span>
+            <h1>{config.label}</h1>
+            <p>{config.description}</p>
+          </div>
+
+          <div className="opsToolbar">
+            <label className="deckSearch">
+              <span>/</span>
+              <input
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder={`Search ${config.label.toLowerCase()}`}
+              />
+            </label>
+            <button
+              className="outlineBtn"
+              onClick={() => {
+                if (!session?.access_token) return;
+                startTransition(() => {
+                  void refreshOverview(session.access_token);
+                  void refreshResource(session.access_token, resource);
+                });
+              }}
+            >
+              Refresh
+            </button>
+            {config.mutable && (
+              <button className="liveBtn" onClick={openCreateDrawer}>
+                New {config.singular}
+              </button>
+            )}
+          </div>
+        </header>
+
+        <section className="opsBody">
+          {error ? <div className="opsError">{error}</div> : null}
+
+          <div className="metricDeck opsMetricDeck">
+            <div>
+              <span>Loaded</span>
+              <strong>{records.length}</strong>
+              <small>Records fetched for this resource</small>
+            </div>
+            <div>
+              <span>Filtered</span>
+              <strong>{filteredRecords.length}</strong>
+              <small>Visible after search</small>
+            </div>
+            <div>
+              <span>Viewer role</span>
+              <strong>{overview?.viewer.role || "operator"}</strong>
+              <small>Write access required for mutations</small>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong>{busy ? "Syncing" : "Ready"}</strong>
+              <small>{config.mutable ? "CRUD enabled" : "Read-only audit trail"}</small>
             </div>
           </div>
-        </div>}
 
-        {view === "list" && <div className="ledger deckPanel">
-          <div className="ledgerHead"><span /><span>Instruction</span><span>Project</span><span>Owner</span><span>Status</span><span>Due</span><span>Review · approval</span></div>
-          {filtered.map(t => <div className="ledgerRow" key={t.id}><button className={`squareCheck ${t.status === "Done" ? "done" : ""}`} onClick={() => move(t.id, t.status === "Done" ? "In progress" : "Done")}><i /></button><span className="instruction"><b className={t.status === "Done" ? "struck" : ""}>{t.title}</b><small>{t.priority} priority</small></span><span>{t.project}</span><button className="ownerLink" onClick={() => setDrawer(t.owner)}>{agents.find(a => a.id === t.owner)?.name}</button><button className={`statusPill s${t.status.replace(" ", "")}`} onClick={() => advance(t.id)}><i />{t.status}</button><span className={t.due.includes("Today") ? "urgent" : ""}>{t.due}</span><span className="reviewState"><b>{t.review}</b><small>{t.approval}</small></span></div>)}
-          <footer>{filtered.length} of {tasks.length} instructions shown</footer>
-        </div>}
+          <div className="opsGrid">
+            <section className="deckPanel opsListPanel">
+              <div className="panelHead">
+                <div>
+                  <span>{config.label}</span>
+                  <h2>{filteredRecords.length} visible records</h2>
+                </div>
+                <small>{config.mutable ? "Create, edit, delete" : "Read only"}</small>
+              </div>
 
-        {view === "kanban" && <div className="kanbanDeck">
-          {statusOrder.map(status => <section className="kanbanColumn" key={status} onDragOver={e => e.preventDefault()} onDrop={() => { if (dragId) move(dragId, status); setDragId(null); }}>
-            <header><span><i />{status}</span><b>{filtered.filter(t => t.status === status).length}</b></header><p>{status === "Inbox" ? "Awaiting acknowledgement." : status === "In progress" ? "Owned and moving." : status === "Review" ? "Evidence and sign-off." : "Accepted outcomes."}</p>
-            <div>{filtered.filter(t => t.status === status).map(t => <article draggable key={t.id} onDragStart={() => setDragId(t.id)} onDragEnd={() => setDragId(null)} onClick={() => setDrawer(t.owner)}><header><span>{t.project}</span><em>{t.priority.slice(0, 1)}</em></header><h3>{t.title}</h3><p>{t.note}</p><footer><span><AgentMark id={t.owner} />{agents.find(a => a.id === t.owner)?.name}</span><button onClick={e => { e.stopPropagation(); advance(t.id); }}>Advance →</button></footer></article>)}</div>
-            <button className="addInstruction" onClick={() => setDrawer("new")}>Add instruction</button>
-          </section>)}
-        </div>}
+              <div className="opsList">
+                {filteredRecords.map((record) => (
+                  <article key={String(record.id)} className="opsCard">
+                    <button
+                      className="opsCardMain"
+                      onClick={() => {
+                        if (config.mutable) {
+                          openEditDrawer(record);
+                          return;
+                        }
+                        inspectRecord(record);
+                      }}
+                    >
+                      <div className="opsCardTitle">
+                        <strong>{String(record.title || record.name || record.code || record.id || "Untitled")}</strong>
+                        <small>{String(record.status || record.role || record.entry_type || record.action || config.singular)}</small>
+                      </div>
+                      <dl className="opsMeta">
+                        {Object.entries(record)
+                          .filter(([key]) => !["before_data", "after_data", "metadata"].includes(key))
+                          .slice(0, 6)
+                          .map(([key, value]) => (
+                            <div key={key}>
+                              <dt>{formatLabel(key)}</dt>
+                              <dd>{stringifyValue(value)}</dd>
+                            </div>
+                          ))}
+                      </dl>
+                    </button>
 
-        {view === "calendar" && <div className="calendarDeck deckPanel">
-          <div className="calendarBar"><button>←</button><h2>July — August 2026</h2><button>→</button></div>
-          <div className="calendarGrid">{calendar.map((d, i) => <div className={`calendarCell ${d.date === 30 ? "today" : ""}`} key={i}><header><span>{d.dow}</span><b>{d.date}</b></header>{filtered.filter(t => t.day === d.date).map(t => <button key={t.id} onClick={() => setDrawer(t.owner)}><i /><b>{t.title}</b><small>{agents.find(a => a.id === t.owner)?.name}</small></button>)}</div>)}</div>
-        </div>}
+                    {config.mutable ? (
+                      <div className="opsCardActions">
+                        <button className="outlineBtn" onClick={() => openEditDrawer(record)}>Edit</button>
+                        <button className="dangerBtn" onClick={() => void handleDelete(record)}>Delete</button>
+                      </div>
+                    ) : null}
+                  </article>
+                ))}
 
-        {view === "approvals" && <div className="approvalDeck">
-          {approvals.map(a => <section className={`approvalCard deckPanel ${decisions[a.id] ? "decided" : ""}`} key={a.id}>
-            <header><div><span>{a.id} · {a.owner}</span><h2>{a.title}</h2></div><b>{decisions[a.id] || a.due}</b></header>
-            <div className="approvalBody"><div><span>Executive summary</span><p>{a.summary}</p></div><div><span>Risk and consequence</span><p>{a.risk}</p></div><div><span>Quality gate</span><p>{a.signed}</p></div></div>
-            <footer>{decisions[a.id] ? <button className="textLink" onClick={() => setDecisions(prev => { const n = { ...prev }; delete n[a.id]; return n; })}>Reset decision</button> : <><button className="liveBtn" onClick={() => setDecisions(p => ({ ...p, [a.id]: "Approved" }))}>Approve</button><button className="outlineBtn" onClick={() => setDecisions(p => ({ ...p, [a.id]: "Changes requested" }))}>Request changes</button><button className="ghostBtn" onClick={() => setDecisions(p => ({ ...p, [a.id]: "Declined" }))}>Decline</button></>}</footer>
-          </section>)}
-        </div>}
-      </div>
-    </main>
+                {!filteredRecords.length ? (
+                  <div className="opsEmpty">No records matched this view.</div>
+                ) : null}
+              </div>
+            </section>
 
-    {drawer && <div className="drawerShade" onMouseDown={() => setDrawer(null)}><aside className="deckDrawer" onMouseDown={e => e.stopPropagation()}><button className="drawerClose" onClick={() => setDrawer(null)}>Close</button>
-      {drawer === "new" && <form onSubmit={e => { e.preventDefault(); addTask(new FormData(e.currentTarget)); }}><span className="liveLabel">New instruction</span><h2>One outcome, one owner.</h2><p>It lands in the agent’s inbox and waits for acknowledgement.</p><label>Instruction<input name="title" autoFocus required placeholder="What needs to happen?" /></label><label>Context<textarea name="context" placeholder="Background, constraints, links, and expected output." /></label><label>Definition of done<textarea name="dod" placeholder="What proves the work is complete?" /></label><div className="formPair"><label>Agent<select name="agent">{agents.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label>Priority<select name="priority"><option>High</option><option>Medium</option><option>Low</option></select></label></div><label>Project<input name="project" defaultValue="Herzen Co." /></label><label className="signoff"><input type="checkbox" name="signoff" /> Require K2 sign-off</label><button className="liveBtn full">Send instruction</button></form>}
-      {drawer === "brief" && <div><span className="liveLabel">Daily brief · 30 July</span><h2>What moved, what stalled, what needs you.</h2><p>Compiled by Lupe at 10:20 from four agent updates.</p>{[["Completed", "Four meaningful outcomes closed across product, content, and operations."], ["Moved forward", "Skydeo rehearsals passed. August calendar is locked and signed."], ["Blocked", "One content brief waits on K2’s keyword pass."], ["Needs you", "Three approval packages are decision-ready."], ["Not reported", "Rex has not submitted today’s update."], ["Next", "Approve the calendar, resolve the API rate limit, then close the weekly brief."]].map(([l, t]) => <div className="briefLine" key={l}><span>{l}</span><p>{t}</p></div>)}<div className="briefRecommendation"><span>Lupe recommends</span><p>Approve the August calendar this morning. Hold Rex’s budget increase until test 04 closes Friday.</p></div></div>}
-      {activeAgent && <div><div className="agentDrawerHead"><AgentMark id={activeAgent.id} large /><div><span className="liveLabel">{activeAgent.role}</span><h2>{activeAgent.name}</h2></div></div><p>{activeAgent.charter}</p><div className="agentStats"><div><b>{tasks.filter(t => t.owner === activeAgent.id && t.status !== "Done").length}</b><span>Open</span></div><div><b>{tasks.filter(t => t.owner === activeAgent.id && t.status === "Review").length}</b><span>In review</span></div><div><b>{tasks.filter(t => t.owner === activeAgent.id && t.status === "Done").length}</b><span>Closed</span></div></div><h3>Current instructions</h3>{tasks.filter(t => t.owner === activeAgent.id && t.status !== "Done").map(t => <button className="drawerTask" key={t.id} onClick={() => advance(t.id)}><span>{t.status}</span><b>{t.title}</b><small>{t.project} · {t.due}</small></button>)}<h3>Today’s update</h3>{[["Completed", activeAgent.id === "rex" ? "Not submitted." : "Priority work documented and packaged."], ["Moved forward", activeAgent.focus], ["Blocked", activeAgent.id === "c3po" ? "Waiting on calendar approval." : "Nothing blocked."], ["Next", "Advance the highest-consequence open instruction."]].map(([l, t]) => <div className="briefLine" key={l}><span>{l}</span><p>{t}</p></div>)}<button className="liveBtn full" onClick={() => setDrawer("new")}>Send instruction</button></div>}
-    </aside></div>}
-  </div>;
+            <section className="deckPanel opsDetailPanel">
+              <div className="panelHead">
+                <div>
+                  <span>{drawerMode ? (drawerMode === "create" ? "Create" : "Edit") : "Inspect"}</span>
+                  <h2>
+                    {drawerMode
+                      ? `${drawerMode === "create" ? "New" : "Edit"} ${config.singular}`
+                      : "Select a record"}
+                  </h2>
+                </div>
+              </div>
+
+              {drawerMode ? (
+                <div className="opsForm">
+                  {config.fields.map((field) => {
+                    const options = fieldOptions(field, overview);
+                    const value = form[field.name] || "";
+
+                    return (
+                      <label key={field.name}>
+                        {field.label}
+                        {field.kind === "textarea" ? (
+                          <textarea
+                            value={value}
+                            onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
+                            placeholder={field.placeholder}
+                          />
+                        ) : field.kind === "select" ? (
+                          <select
+                            value={value}
+                            onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
+                          >
+                            <option value="">Select</option>
+                            {options?.map((option) => (
+                              <option key={option.value} value={option.value}>{option.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <input
+                            type={field.kind === "date" ? "datetime-local" : "text"}
+                            value={value}
+                            onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
+                            placeholder={field.placeholder}
+                          />
+                        )}
+                        {field.helper ? <small>{field.helper}</small> : null}
+                      </label>
+                    );
+                  })}
+
+                  <div className="opsFormActions">
+                    <button className="ghostBtn" onClick={closeDrawer}>Cancel</button>
+                    <button className="liveBtn" onClick={() => void handleSave()}>
+                      {drawerMode === "create" ? "Create" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : selected ? (
+                <pre className="opsInspect">{JSON.stringify(selected, null, 2)}</pre>
+              ) : (
+                <div className="opsEmpty opsEmptyDetail">
+                  Choose a record to inspect or edit, or create a new one.
+                </div>
+              )}
+            </section>
+          </div>
+        </section>
+      </main>
+    </div>
+  );
 }
