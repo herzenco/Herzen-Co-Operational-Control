@@ -89,6 +89,11 @@ Content-Type: application/json
 | Work logs | `/api/v1/work-logs` | Document progress, decisions, blockers, evidence, and deliverables |
 | Daily updates | `/api/v1/daily-updates` | Submit and revise each agent's daily report |
 | Approvals | `/api/v1/approvals` | Package, approve, decline, or request changes |
+| Content properties | `/api/v1/content-properties` | Manage brands and pause or activate their content operation |
+| Content channels | `/api/v1/content-channels` | Manage platform accounts and their publishing mode |
+| Content types | `/api/v1/content-types` | Propose and activate the formats recommended by K2 |
+| Content items | `/api/v1/content-items` | Create, document, approve, schedule, publish, and verify content |
+| Content status history | `/api/v1/content-status-history` | Read the append-only content workflow history |
 | Activity | `/api/v1/activity` | Read the immutable audit trail |
 
 Every mutable resource supports:
@@ -119,8 +124,109 @@ Supported filters:
 - Work logs: `task_id`, `agent_id`, `entry_type`
 - Daily updates: `agent_id`, `update_date`, `health`
 - Approvals: `task_id`, `project_id`, `requested_by_agent_id`,
-  `reviewer_agent_id`, `status`
+  `content_item_id`, `reviewer_agent_id`, `status`
+- Content properties: `slug`, `status`
+- Content channels: `property_id`, `platform`, `status`, `publishing_mode`
+- Content types: `slug`, `status`, `recommended_by_agent_id`
+- Content items: `property_id`, `channel_id`, `content_type_id`,
+  `owner_agent_id`, `distribution_mode`, `status`
+- Content status history: `content_item_id`, `from_status`, `to_status`,
+  `changed_by`
 - Activity: `actor_user_id`, `action`, `entity_type`, `entity_id`
+
+## Content operating model
+
+The initial properties and channels are:
+
+- Herzen Co.: Instagram (`manual`), LinkedIn (`lupe_automated`), and Website
+  (`occ_automated`).
+- Humanismo Evolutivo: Website, paused.
+- Bubbles n Salt: Instagram (`manual`).
+
+Skydeo is not a content property.
+
+Every content item uses this day-one governance:
+
+1. K2 supplies research and format recommendations.
+2. C-3PO creates organic social and website content, or Rex creates paid media.
+3. Lupe reviews and assembles the approval package.
+4. Tito must approve every item.
+5. The approved item is scheduled and handed to the configured publisher.
+6. Lupe records the final URL, result, and required evidence.
+
+The database rejects `approved`, `scheduled`, `publishing`, and `published`
+states until an approval decision has recorded both `approved_by` and
+`approved_at`. Instagram also requires a final URL and screenshot path before
+it can be marked `published`.
+
+Content status values:
+
+```text
+idea
+research_ready
+drafting
+ready_for_lupe
+awaiting_tito
+revision_requested
+approved
+scheduled
+publishing
+published
+blocked
+failed
+cancelled
+```
+
+### Create a content item
+
+```http
+POST /api/v1/content-items
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "title": "Founder operating note",
+  "brief": "Turn K2's research into a concise LinkedIn post.",
+  "property_id": "<Herzen Co. property uuid>",
+  "channel_id": "<Herzen Co. LinkedIn channel uuid>",
+  "owner_agent_id": "<C-3PO uuid>",
+  "research_owner_agent_id": "<K2 uuid>",
+  "distribution_mode": "organic",
+  "status": "idea"
+}
+```
+
+### Send content to Tito
+
+Lupe first creates an approval linked through `content_item_id`, then updates
+the content item to `awaiting_tito` with the returned `approval_id`.
+
+Approving the linked approval automatically records Tito as `approved_by`,
+records `approved_at`, and moves the item to `approved`. Requesting changes
+moves it to `revision_requested`.
+
+### Record publication
+
+LinkedIn publishing occurs through Lupe's external automation. The Control
+Center tracks its external job/status and final URL. Website publishing is
+OCC-managed. Instagram starts as manual.
+
+```http
+PATCH /api/v1/content-items/<content uuid>
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "status": "published",
+  "final_url": "https://www.instagram.com/p/example/",
+  "screenshot_path": "<private Supabase Storage object path>",
+  "published_at": "2026-07-30T21:00:00Z"
+}
+```
+
+Screenshots belong in the private `content-publication-evidence` bucket.
+Authenticated owners/operators may upload JPEG, PNG, or WebP files up to 10 MB
+under a folder named with their Supabase user ID.
 
 ## Common operations
 

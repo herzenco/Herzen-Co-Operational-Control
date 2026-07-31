@@ -1,5 +1,11 @@
 # Herzen Co. Operations Control Center
 
+> **Implementation note:** This original product guide includes early roadmap
+> language that predates the live Supabase/API implementation. Lupe should use
+> [`docs/LUPE_HANDOFF_AND_ROADMAP.md`](docs/LUPE_HANDOFF_AND_ROADMAP.md) as the
+> current source of truth for implemented capabilities, content governance, and
+> next priorities.
+
 ## Capabilities and operating guide
 
 **Product owner:** Tito Valenzuela  

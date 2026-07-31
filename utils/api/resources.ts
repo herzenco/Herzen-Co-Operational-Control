@@ -5,6 +5,11 @@ export type ResourceName =
   | "work-logs"
   | "daily-updates"
   | "approvals"
+  | "content-properties"
+  | "content-channels"
+  | "content-types"
+  | "content-items"
+  | "content-status-history"
   | "activity";
 
 type ResourceConfig = {
@@ -60,9 +65,61 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   approvals: {
     table: "approvals",
     mutable: true,
-    createFields: ["task_id", "project_id", "requested_by_agent_id", "reviewer_agent_id", "title", "summary", "evidence", "risk", "recommendation", "status", "decision_note", "due_at"],
-    updateFields: ["task_id", "project_id", "requested_by_agent_id", "reviewer_agent_id", "title", "summary", "evidence", "risk", "recommendation", "status", "decision_note", "due_at", "decided_at", "decided_by"],
-    filters: ["task_id", "project_id", "requested_by_agent_id", "reviewer_agent_id", "status"],
+    createFields: ["task_id", "project_id", "content_item_id", "requested_by_agent_id", "reviewer_agent_id", "title", "summary", "evidence", "risk", "recommendation", "status", "decision_note", "due_at"],
+    updateFields: ["task_id", "project_id", "content_item_id", "requested_by_agent_id", "reviewer_agent_id", "title", "summary", "evidence", "risk", "recommendation", "status", "decision_note", "due_at", "decided_at", "decided_by"],
+    filters: ["task_id", "project_id", "content_item_id", "requested_by_agent_id", "reviewer_agent_id", "status"],
+    defaultOrder: "created_at",
+  },
+  "content-properties": {
+    table: "content_properties",
+    mutable: true,
+    createFields: ["name", "slug", "status", "notes"],
+    updateFields: ["name", "slug", "status", "notes"],
+    filters: ["slug", "status"],
+    defaultOrder: "name",
+  },
+  "content-channels": {
+    table: "content_channels",
+    mutable: true,
+    createFields: ["property_id", "platform", "account_name", "account_identifier", "status", "publishing_mode", "configuration"],
+    updateFields: ["property_id", "platform", "account_name", "account_identifier", "status", "publishing_mode", "configuration"],
+    filters: ["property_id", "platform", "status", "publishing_mode"],
+    defaultOrder: "created_at",
+  },
+  "content-types": {
+    table: "content_types",
+    mutable: true,
+    createFields: ["name", "slug", "description", "status", "recommended_by_agent_id", "properties"],
+    updateFields: ["name", "slug", "description", "status", "recommended_by_agent_id", "properties"],
+    filters: ["slug", "status", "recommended_by_agent_id"],
+    defaultOrder: "name",
+  },
+  "content-items": {
+    table: "content_items",
+    mutable: true,
+    createFields: [
+      "title", "brief", "body", "property_id", "channel_id", "content_type_id",
+      "owner_agent_id", "research_owner_agent_id", "task_id", "approval_id",
+      "distribution_mode", "status", "approval_required",
+      "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
+      "external_status", "failure_message", "research_brief", "metadata",
+    ],
+    updateFields: [
+      "title", "brief", "body", "property_id", "channel_id", "content_type_id",
+      "owner_agent_id", "research_owner_agent_id", "task_id", "approval_id",
+      "distribution_mode", "status", "approval_required",
+      "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
+      "external_status", "failure_message", "research_brief", "metadata",
+    ],
+    filters: ["property_id", "channel_id", "content_type_id", "owner_agent_id", "distribution_mode", "status"],
+    defaultOrder: "created_at",
+  },
+  "content-status-history": {
+    table: "content_status_history",
+    mutable: false,
+    createFields: [],
+    updateFields: [],
+    filters: ["content_item_id", "from_status", "to_status", "changed_by"],
     defaultOrder: "created_at",
   },
   activity: {

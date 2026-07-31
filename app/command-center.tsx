@@ -1,410 +1,186 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 
-type ResourceName =
-  | "agents"
-  | "projects"
-  | "tasks"
-  | "work-logs"
-  | "daily-updates"
-  | "approvals"
-  | "activity";
-
-type FieldKind = "text" | "textarea" | "select" | "date" | "json" | "list";
-
-type FieldConfig = {
-  name: string;
-  label: string;
-  kind: FieldKind;
-  options?: Array<{ value: string; label: string }>;
-  placeholder?: string;
-  helper?: string;
-};
-
-type ResourceConfig = {
-  name: ResourceName;
-  label: string;
-  description: string;
-  mutable: boolean;
-  singular: string;
-  fields: FieldConfig[];
-};
+type View = "command" | "kanban" | "list" | "worklogs" | "content" | "approvals";
+type RecordValue = Record<string, unknown>;
 
 type Viewer = {
   display_name: string;
   role: string;
 };
 
-type OverviewCounts = {
-  agents: number;
-  projects: number;
-  tasks: number;
-  open_tasks: number;
-  pending_approvals: number;
-};
-
-type OverviewData = {
+type Overview = {
   viewer: Viewer;
-  agents: Record<string, unknown>[];
-  projects: Record<string, unknown>[];
-  tasks: Record<string, unknown>[];
-  counts: OverviewCounts;
-};
-
-type CollectionResponse = {
-  data: {
-    items: Record<string, unknown>[];
-    count: number;
-    limit: number;
-    offset: number;
+  agents: RecordValue[];
+  projects: RecordValue[];
+  tasks: RecordValue[];
+  counts: {
+    agents: number;
+    projects: number;
+    tasks: number;
+    open_tasks: number;
+    pending_approvals: number;
   };
 };
 
-type ApiError = {
-  error?: {
-    message?: string;
-  };
+type TaskForm = {
+  title: string;
+  description: string;
+  owner_agent_id: string;
+  project_id: string;
+  priority: string;
+  due_at: string;
+  definition_of_done: string;
+  status: string;
 };
 
-type FormState = Record<string, string>;
+type ContentForm = {
+  title: string;
+  brief: string;
+  body: string;
+  property_id: string;
+  channel_id: string;
+  content_type_id: string;
+  owner_agent_id: string;
+  distribution_mode: "organic" | "paid";
+  status: string;
+  publish_at: string;
+  final_url: string;
+  failure_message: string;
+};
 
-const RESOURCE_CONFIGS: ResourceConfig[] = [
-  {
-    name: "agents",
-    label: "Agents",
-    singular: "agent",
-    description: "Roster, permissions mapping, reporting lines, and operating scope.",
-    mutable: true,
-    fields: [
-      { name: "code", label: "Code", kind: "text", placeholder: "c3po" },
-      { name: "name", label: "Name", kind: "text", placeholder: "C-3PO" },
-      { name: "role", label: "Role", kind: "text", placeholder: "Content operator" },
-      { name: "lane", label: "Lane", kind: "text", placeholder: "Content" },
-      {
-        name: "status",
-        label: "Status",
-        kind: "select",
-        options: [
-          { value: "active", label: "Active" },
-          { value: "paused", label: "Paused" },
-          { value: "retired", label: "Retired" },
-        ],
-      },
-      { name: "charter", label: "Charter", kind: "textarea" },
-      { name: "instructions", label: "Instructions", kind: "textarea" },
-      { name: "capabilities", label: "Capabilities", kind: "list", helper: "One item per line." },
-      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
-      { name: "auth_user_id", label: "Auth User ID", kind: "text" },
-      { name: "reports_to", label: "Reports To", kind: "select" },
-    ],
-  },
-  {
-    name: "projects",
-    label: "Projects",
-    singular: "project",
-    description: "Operating initiatives, ownership, objectives, and project status.",
-    mutable: true,
-    fields: [
-      { name: "name", label: "Name", kind: "text" },
-      { name: "slug", label: "Slug", kind: "text", placeholder: "operational-command-center" },
-      { name: "description", label: "Description", kind: "textarea" },
-      {
-        name: "status",
-        label: "Status",
-        kind: "select",
-        options: [
-          { value: "planned", label: "Planned" },
-          { value: "active", label: "Active" },
-          { value: "paused", label: "Paused" },
-          { value: "completed", label: "Completed" },
-          { value: "archived", label: "Archived" },
-        ],
-      },
-      { name: "owner_agent_id", label: "Owner Agent", kind: "select" },
-      { name: "objectives", label: "Objectives", kind: "list", helper: "One objective per line." },
-      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
-    ],
-  },
-  {
-    name: "tasks",
-    label: "Tasks",
-    singular: "task",
-    description: "Instructions, ownership, due dates, dependencies, and definitions of done.",
-    mutable: true,
-    fields: [
-      { name: "title", label: "Title", kind: "text" },
-      { name: "description", label: "Description", kind: "textarea" },
-      { name: "project_id", label: "Project", kind: "select" },
-      { name: "owner_agent_id", label: "Owner Agent", kind: "select" },
-      {
-        name: "status",
-        label: "Status",
-        kind: "select",
-        options: [
-          { value: "inbox", label: "Inbox" },
-          { value: "in_progress", label: "In Progress" },
-          { value: "blocked", label: "Blocked" },
-          { value: "review", label: "Review" },
-          { value: "done", label: "Done" },
-          { value: "cancelled", label: "Cancelled" },
-        ],
-      },
-      {
-        name: "priority",
-        label: "Priority",
-        kind: "select",
-        options: [
-          { value: "urgent", label: "Urgent" },
-          { value: "high", label: "High" },
-          { value: "medium", label: "Medium" },
-          { value: "low", label: "Low" },
-        ],
-      },
-      { name: "due_at", label: "Due At", kind: "date" },
-      { name: "definition_of_done", label: "Definition Of Done", kind: "textarea" },
-      { name: "dependencies", label: "Dependencies", kind: "list", helper: "One dependency per line." },
-      { name: "tags", label: "Tags", kind: "list", helper: "One tag per line." },
-      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
-    ],
-  },
-  {
-    name: "work-logs",
-    label: "Work Logs",
-    singular: "work log",
-    description: "Progress notes, decisions, blockers, evidence, and deliverables.",
-    mutable: true,
-    fields: [
-      { name: "task_id", label: "Task", kind: "select" },
-      { name: "agent_id", label: "Agent", kind: "select" },
-      {
-        name: "entry_type",
-        label: "Entry Type",
-        kind: "select",
-        options: [
-          { value: "note", label: "Note" },
-          { value: "progress", label: "Progress" },
-          { value: "decision", label: "Decision" },
-          { value: "blocker", label: "Blocker" },
-          { value: "deliverable", label: "Deliverable" },
-          { value: "evidence", label: "Evidence" },
-        ],
-      },
-      { name: "title", label: "Title", kind: "text" },
-      { name: "body", label: "Body", kind: "textarea" },
-      { name: "artifacts", label: "Artifacts", kind: "json", helper: "Use JSON for structured links and attachments." },
-      { name: "metadata", label: "Metadata", kind: "json", helper: "Valid JSON object or array." },
-    ],
-  },
-  {
-    name: "daily-updates",
-    label: "Daily Updates",
-    singular: "daily update",
-    description: "Daily state by agent, including blockers, next steps, and health.",
-    mutable: true,
-    fields: [
-      { name: "agent_id", label: "Agent", kind: "select" },
-      { name: "update_date", label: "Update Date", kind: "date" },
-      { name: "summary", label: "Summary", kind: "textarea" },
-      { name: "completed", label: "Completed", kind: "list", helper: "One item per line." },
-      { name: "blockers", label: "Blockers", kind: "list", helper: "One item per line." },
-      { name: "next_steps", label: "Next Steps", kind: "list", helper: "One item per line." },
-      { name: "asks", label: "Asks", kind: "list", helper: "One item per line." },
-      {
-        name: "health",
-        label: "Health",
-        kind: "select",
-        options: [
-          { value: "on_track", label: "On Track" },
-          { value: "at_risk", label: "At Risk" },
-          { value: "blocked", label: "Blocked" },
-        ],
-      },
-    ],
-  },
-  {
-    name: "approvals",
-    label: "Approvals",
-    singular: "approval",
-    description: "Decision packages for Tito with evidence, risk, and recommendation.",
-    mutable: true,
-    fields: [
-      { name: "task_id", label: "Task", kind: "select" },
-      { name: "project_id", label: "Project", kind: "select" },
-      { name: "requested_by_agent_id", label: "Requested By", kind: "select" },
-      { name: "reviewer_agent_id", label: "Reviewer", kind: "select" },
-      { name: "title", label: "Title", kind: "text" },
-      { name: "summary", label: "Summary", kind: "textarea" },
-      { name: "evidence", label: "Evidence", kind: "list", helper: "One proof point per line." },
-      { name: "risk", label: "Risk", kind: "textarea" },
-      { name: "recommendation", label: "Recommendation", kind: "textarea" },
-      {
-        name: "status",
-        label: "Status",
-        kind: "select",
-        options: [
-          { value: "pending", label: "Pending" },
-          { value: "approved", label: "Approved" },
-          { value: "changes_requested", label: "Changes Requested" },
-          { value: "declined", label: "Declined" },
-          { value: "withdrawn", label: "Withdrawn" },
-        ],
-      },
-      { name: "decision_note", label: "Decision Note", kind: "textarea" },
-      { name: "due_at", label: "Due At", kind: "date" },
-    ],
-  },
-  {
-    name: "activity",
-    label: "Activity",
-    singular: "activity event",
-    description: "Immutable audit trail of inserts, updates, and deletes.",
-    mutable: false,
-    fields: [],
-  },
+const EMPTY_FORM: TaskForm = {
+  title: "",
+  description: "",
+  owner_agent_id: "",
+  project_id: "",
+  priority: "medium",
+  due_at: "",
+  definition_of_done: "",
+  status: "inbox",
+};
+
+const EMPTY_CONTENT_FORM: ContentForm = {
+  title: "",
+  brief: "",
+  body: "",
+  property_id: "",
+  channel_id: "",
+  content_type_id: "",
+  owner_agent_id: "",
+  distribution_mode: "organic",
+  status: "idea",
+  publish_at: "",
+  final_url: "",
+  failure_message: "",
+};
+
+const CONTENT_STATUS_LABELS: Record<string, string> = {
+  idea: "Idea",
+  research_ready: "Research ready",
+  drafting: "Drafting",
+  ready_for_lupe: "Ready for Lupe",
+  awaiting_tito: "Awaiting Tito",
+  revision_requested: "Revision requested",
+  approved: "Approved",
+  scheduled: "Scheduled",
+  publishing: "Publishing",
+  published: "Published",
+  blocked: "Blocked",
+  failed: "Failed",
+  cancelled: "Cancelled",
+};
+
+const VIEWS: Array<{ id: View; label: string }> = [
+  { id: "command", label: "Command" },
+  { id: "kanban", label: "Kanban" },
+  { id: "list", label: "List" },
+  { id: "worklogs", label: "Work Logs" },
+  { id: "content", label: "Content" },
+  { id: "approvals", label: "Approvals" },
 ];
 
-const EMPTY_COUNTS: OverviewCounts = {
-  agents: 0,
-  projects: 0,
-  tasks: 0,
-  open_tasks: 0,
-  pending_approvals: 0,
-};
+const STATUS_COLUMNS = [
+  { id: "inbox", label: "Inbox", note: "Instructions waiting to start" },
+  { id: "in_progress", label: "In progress", note: "Active work across the roster" },
+  { id: "review", label: "Review", note: "Awaiting K2 or owner review" },
+  { id: "done", label: "Done", note: "Closed and documented" },
+];
 
-function formatLabel(value: string) {
-  return value
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+function text(value: unknown, fallback = "—") {
+  if (value === null || value === undefined || value === "") return fallback;
+  return String(value);
 }
 
-function stringifyValue(value: unknown) {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  return JSON.stringify(value, null, 2);
+function dateLabel(value: unknown) {
+  if (!value) return "No due date";
+  const date = new Date(String(value));
+  if (Number.isNaN(date.getTime())) return "No due date";
+  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(date);
 }
 
-function defaultFormState(config: ResourceConfig, record?: Record<string, unknown>): FormState {
-  return Object.fromEntries(
-    config.fields.map((field) => {
-      const value = record?.[field.name];
-      if (value === null || value === undefined) return [field.name, ""];
-      if (field.kind === "json") return [field.name, JSON.stringify(value, null, 2)];
-      if (field.kind === "list") return [field.name, Array.isArray(value) ? value.join("\n") : String(value)];
-      if (field.kind === "date") return [field.name, typeof value === "string" ? value.slice(0, 16) : ""];
-      return [field.name, String(value)];
-    }),
-  );
+function initials(value: unknown) {
+  return text(value, "?")
+    .split(/[\s-]+/)
+    .map((part) => part[0])
+    .join("")
+    .slice(0, 3)
+    .toUpperCase();
 }
 
-function toPayload(config: ResourceConfig, form: FormState) {
-  const payload: Record<string, unknown> = {};
-
-  for (const field of config.fields) {
-    const rawValue = (form[field.name] || "").trim();
-    if (!rawValue) continue;
-
-    if (field.kind === "json") {
-      payload[field.name] = JSON.parse(rawValue);
-      continue;
-    }
-
-    if (field.kind === "list") {
-      payload[field.name] = rawValue
-        .split("\n")
-        .map((item) => item.trim())
-        .filter(Boolean);
-      continue;
-    }
-
-    if (field.kind === "date") {
-      payload[field.name] = new Date(rawValue).toISOString();
-      continue;
-    }
-
-    payload[field.name] = rawValue;
-  }
-
-  return payload;
+function taskStatus(task: RecordValue) {
+  return text(task.status, "inbox");
 }
 
-function fieldOptions(
-  field: FieldConfig,
-  overview: OverviewData | null,
-): Array<{ value: string; label: string }> | undefined {
-  if (field.options) return field.options;
-  if (!overview) return undefined;
-
-  if (["reports_to", "owner_agent_id", "agent_id", "requested_by_agent_id", "reviewer_agent_id"].includes(field.name)) {
-    return overview.agents.map((agent) => ({
-      value: String(agent.id),
-      label: String(agent.name || agent.code || agent.id),
-    }));
-  }
-
-  if (field.name === "project_id") {
-    return overview.projects.map((project) => ({
-      value: String(project.id),
-      label: String(project.name || project.slug || project.id),
-    }));
-  }
-
-  if (field.name === "task_id") {
-    return overview.tasks.map((task) => ({
-      value: String(task.id),
-      label: String(task.title || task.id),
-    }));
-  }
-
-  return undefined;
-}
-
-function sortByCreatedAt(records: Record<string, unknown>[]) {
-  return [...records].sort((left, right) =>
-    String(right.created_at || "").localeCompare(String(left.created_at || "")),
-  );
+function statusLabel(status: string) {
+  return status.replaceAll("_", " ");
 }
 
 export function CommandCenter() {
   const supabase = useMemo(() => createClient(), []);
-  const [resource, setResource] = useState<ResourceName>("tasks");
   const [session, setSession] = useState<Session | null>(null);
-  const [overview, setOverview] = useState<OverviewData | null>(null);
-  const [records, setRecords] = useState<Record<string, unknown>[]>([]);
+  const [overview, setOverview] = useState<Overview | null>(null);
+  const [approvals, setApprovals] = useState<RecordValue[]>([]);
+  const [updates, setUpdates] = useState<RecordValue[]>([]);
+  const [workLogs, setWorkLogs] = useState<RecordValue[]>([]);
+  const [contentItems, setContentItems] = useState<RecordValue[]>([]);
+  const [contentProperties, setContentProperties] = useState<RecordValue[]>([]);
+  const [contentChannels, setContentChannels] = useState<RecordValue[]>([]);
+  const [contentTypes, setContentTypes] = useState<RecordValue[]>([]);
+  const [contentHistory, setContentHistory] = useState<RecordValue[]>([]);
+  const [view, setView] = useState<View>("command");
+  const [lane, setLane] = useState("all");
   const [query, setQuery] = useState("");
-  const [selected, setSelected] = useState<Record<string, unknown> | null>(null);
-  const [drawerMode, setDrawerMode] = useState<"create" | "edit" | null>(null);
-  const [form, setForm] = useState<FormState>({});
-  const [error, setError] = useState<string>("");
+  const [contentPlatform, setContentPlatform] = useState("all");
+  const [contentAccount, setContentAccount] = useState("all");
+  const [contentType, setContentType] = useState("all");
+  const [todayLabel, setTodayLabel] = useState("Today");
+  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "content" | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
+  const [selectedContent, setSelectedContent] = useState<RecordValue | null>(null);
+  const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
+  const [contentForm, setContentForm] = useState<ContentForm>(EMPTY_CONTENT_FORM);
+  const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [error, setError] = useState("");
   const [busy, startTransition] = useTransition();
-  const deferredQuery = useDeferredValue(query);
-  const config = RESOURCE_CONFIGS.find((item) => item.name === resource)!;
 
   useEffect(() => {
     let cancelled = false;
-
-    async function loadSession() {
-      const { data } = await supabase.auth.getSession();
+    void supabase.auth.getSession().then(({ data }) => {
       if (cancelled) return;
-
       if (!data.session) {
         window.location.href = "/login";
         return;
       }
-
       setSession(data.session);
-    }
+    });
 
-    void loadSession();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      if (!nextSession) window.location.href = "/login";
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, next) => {
+      setSession(next);
+      if (!next) window.location.href = "/login";
     });
 
     return () => {
@@ -415,16 +191,23 @@ export function CommandCenter() {
 
   useEffect(() => {
     if (!session) return;
+    startTransition(() => void refreshAll(session.access_token));
+  }, [session]);
 
-    startTransition(() => {
-      void refreshOverview(session.access_token);
-      void refreshResource(session.access_token, resource);
-    });
-  }, [resource, session]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setTodayLabel(new Intl.DateTimeFormat("en-US", {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+        timeZone: "America/New_York",
+      }).format(new Date()));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
 
-  async function apiFetch(path: string, init?: RequestInit) {
+  async function request(path: string, init?: RequestInit) {
     if (!session?.access_token) throw new Error("Your session expired. Sign in again.");
-
     const response = await fetch(path, {
       ...init,
       headers: {
@@ -433,356 +216,806 @@ export function CommandCenter() {
         ...(init?.headers || {}),
       },
     });
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as ApiError | null;
-      throw new Error(body?.error?.message || `Request failed with status ${response.status}.`);
-    }
-
-    return response.json();
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(payload?.error?.message || `Request failed (${response.status}).`);
+    return payload;
   }
 
-  async function refreshOverview(accessToken: string) {
-    const response = await fetch("/api/v1/overview", {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as ApiError | null;
-      throw new Error(body?.error?.message || "Could not load the operations overview.");
-    }
-
-    const payload = await response.json();
-    setOverview(payload.data as OverviewData);
-  }
-
-  async function refreshResource(accessToken: string, nextResource: ResourceName) {
-    const response = await fetch(`/api/v1/${nextResource}?limit=200&offset=0`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    });
-
-    if (!response.ok) {
-      const body = (await response.json().catch(() => null)) as ApiError | null;
-      throw new Error(body?.error?.message || `Could not load ${nextResource}.`);
-    }
-
-    const payload = (await response.json()) as CollectionResponse;
-    setRecords(sortByCreatedAt(payload.data.items));
-  }
-
-  function openCreateDrawer() {
-    setSelected(null);
-    setForm(defaultFormState(config));
-    setDrawerMode("create");
-    setError("");
-  }
-
-  function openEditDrawer(record: Record<string, unknown>) {
-    setSelected(record);
-    setForm(defaultFormState(config, record));
-    setDrawerMode("edit");
-    setError("");
-  }
-
-  function inspectRecord(record: Record<string, unknown>) {
-    setSelected(record);
-    setDrawerMode(null);
-    setForm({});
-    setError("");
-  }
-
-  function closeDrawer() {
-    setDrawerMode(null);
-    setSelected(null);
-    setForm({});
-    setError("");
-  }
-
-  async function handleSave() {
+  async function refreshAll(accessToken: string) {
     try {
       setError("");
-      const payload = toPayload(config, form);
-      const path = drawerMode === "edit" && selected?.id
-        ? `/api/v1/${resource}/${selected.id}`
-        : `/api/v1/${resource}`;
+      const headers = { Authorization: `Bearer ${accessToken}` };
+      const [
+        overviewResponse,
+        approvalsResponse,
+        updatesResponse,
+        workLogsResponse,
+        contentItemsResponse,
+        propertiesResponse,
+        channelsResponse,
+        typesResponse,
+        historyResponse,
+      ] = await Promise.all([
+        fetch("/api/v1/overview", { headers }),
+        fetch("/api/v1/approvals?limit=200&offset=0", { headers }),
+        fetch("/api/v1/daily-updates?limit=200&offset=0", { headers }),
+        fetch("/api/v1/work-logs?limit=200&offset=0", { headers }),
+        fetch("/api/v1/content-items?limit=500&offset=0", { headers }),
+        fetch("/api/v1/content-properties?limit=100&offset=0", { headers }),
+        fetch("/api/v1/content-channels?limit=100&offset=0", { headers }),
+        fetch("/api/v1/content-types?limit=100&offset=0", { headers }),
+        fetch("/api/v1/content-status-history?limit=500&offset=0", { headers }),
+      ]);
+      const [
+        overviewPayload,
+        approvalsPayload,
+        updatesPayload,
+        workLogsPayload,
+        contentItemsPayload,
+        propertiesPayload,
+        channelsPayload,
+        typesPayload,
+        historyPayload,
+      ] = await Promise.all([
+        overviewResponse.json(),
+        approvalsResponse.json(),
+        updatesResponse.json(),
+        workLogsResponse.json(),
+        contentItemsResponse.json(),
+        propertiesResponse.json(),
+        channelsResponse.json(),
+        typesResponse.json(),
+        historyResponse.json(),
+      ]);
+      if (!overviewResponse.ok) throw new Error(overviewPayload?.error?.message || "Could not load operations.");
+      const contentResponses = [
+        contentItemsResponse,
+        propertiesResponse,
+        channelsResponse,
+        typesResponse,
+        historyResponse,
+      ];
+      const contentPayloads = [
+        contentItemsPayload,
+        propertiesPayload,
+        channelsPayload,
+        typesPayload,
+        historyPayload,
+      ];
+      const failedContentIndex = contentResponses.findIndex((response) => !response.ok);
+      if (failedContentIndex >= 0) {
+        throw new Error(contentPayloads[failedContentIndex]?.error?.message || "Could not load content operations. Apply the content operations migration first.");
+      }
+      setOverview(overviewPayload.data);
+      setApprovals(approvalsResponse.ok ? approvalsPayload.data.items : []);
+      setUpdates(updatesResponse.ok ? updatesPayload.data.items : []);
+      setWorkLogs(workLogsResponse.ok ? workLogsPayload.data.items : []);
+      setContentItems(contentItemsPayload.data.items);
+      setContentProperties(propertiesPayload.data.items);
+      setContentChannels(channelsPayload.data.items);
+      setContentTypes(typesPayload.data.items);
+      setContentHistory(historyPayload.data.items);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : "Could not load operations.");
+    }
+  }
 
-      await apiFetch(path, {
-        method: drawerMode === "edit" ? "PATCH" : "POST",
-        body: JSON.stringify(payload),
-      });
-
-      if (!session?.access_token) return;
-      await refreshOverview(session.access_token);
-      await refreshResource(session.access_token, resource);
-      closeDrawer();
+  async function createTask() {
+    if (!form.title.trim()) {
+      setError("Give the instruction a title before assigning it.");
+      return;
+    }
+    try {
+      setError("");
+      const payload: RecordValue = {
+        title: form.title.trim(),
+        description: form.description.trim(),
+        status: form.status,
+        priority: form.priority,
+        definition_of_done: form.definition_of_done.trim(),
+      };
+      if (form.owner_agent_id) payload.owner_agent_id = form.owner_agent_id;
+      if (form.project_id) payload.project_id = form.project_id;
+      if (form.due_at) payload.due_at = new Date(form.due_at).toISOString();
+      await request("/api/v1/tasks", { method: "POST", body: JSON.stringify(payload) });
+      setDrawer(null);
+      setForm(EMPTY_FORM);
+      if (session) await refreshAll(session.access_token);
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "The record could not be saved.");
+      setError(saveError instanceof Error ? saveError.message : "Could not create the instruction.");
     }
   }
 
-  async function handleDelete(record: Record<string, unknown>) {
-    if (!config.mutable || !record.id) return;
-    const confirmed = window.confirm(`Delete this ${config.singular}? This cannot be undone from the UI.`);
-    if (!confirmed) return;
+  async function moveTask(task: RecordValue, status: string) {
+    try {
+      await request(`/api/v1/tasks/${task.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, completed_at: status === "done" ? new Date().toISOString() : null }),
+      });
+      if (session) await refreshAll(session.access_token);
+    } catch (moveError) {
+      setError(moveError instanceof Error ? moveError.message : "Could not update the task.");
+    }
+  }
+
+  async function decide(approval: RecordValue, status: "approved" | "changes_requested" | "declined") {
+    try {
+      await request(`/api/v1/approvals/${approval.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status, decided_at: new Date().toISOString() }),
+      });
+      if (session) await refreshAll(session.access_token);
+    } catch (decisionError) {
+      setError(decisionError instanceof Error ? decisionError.message : "Could not record the decision.");
+    }
+  }
+
+  const agents = useMemo(() => [...(overview?.agents || [])].sort((left, right) => {
+    const leftIsLupe = text(left.name || left.code).toLowerCase() === "lupe";
+    const rightIsLupe = text(right.name || right.code).toLowerCase() === "lupe";
+    if (leftIsLupe === rightIsLupe) return 0;
+    return leftIsLupe ? -1 : 1;
+  }), [overview]);
+  const projects = useMemo(() => overview?.projects || [], [overview]);
+  const tasks = useMemo(() => overview?.tasks || [], [overview]);
+  const agentMap = useMemo(
+    () => new Map(agents.map((agent) => [String(agent.id), text(agent.name || agent.code)])),
+    [agents],
+  );
+  const projectMap = useMemo(
+    () => new Map(projects.map((project) => [String(project.id), text(project.name || project.slug)])),
+    [projects],
+  );
+  const latestUpdate = useMemo(() => {
+    const map = new Map<string, RecordValue>();
+    [...updates]
+      .sort((a, b) => text(b.update_date || b.created_at).localeCompare(text(a.update_date || a.created_at)))
+      .forEach((update) => {
+        const id = String(update.agent_id || "");
+        if (id && !map.has(id)) map.set(id, update);
+      });
+    return map;
+  }, [updates]);
+
+  const visibleTasks = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return tasks.filter((task) => {
+      const laneMatch = lane === "all" || String(task.owner_agent_id) === lane;
+      const searchMatch = !needle || JSON.stringify(task).toLowerCase().includes(needle);
+      return laneMatch && searchMatch;
+    });
+  }, [lane, query, tasks]);
+
+  const pendingApprovals = approvals.filter((approval) => text(approval.status, "pending") === "pending");
+  const dueToday = tasks.filter((task) => {
+    if (!task.due_at || taskStatus(task) === "done") return false;
+    return new Date(String(task.due_at)).toDateString() === new Date().toDateString();
+  });
+  const contentDueToday = contentItems
+    .filter((item) => {
+      if (!item.publish_at || ["published", "cancelled"].includes(text(item.status))) return false;
+      return new Date(String(item.publish_at)).toDateString() === new Date().toDateString();
+    })
+    .sort((left, right) => new Date(String(left.publish_at)).getTime() - new Date(String(right.publish_at)).getTime());
+  const reporting = agents.filter((agent) => latestUpdate.has(String(agent.id))).length;
+  const activeTasks = tasks.filter((task) => !["done", "cancelled"].includes(taskStatus(task)));
+  const blockedTasks = activeTasks.filter((task) => taskStatus(task) === "blocked");
+  const overdueTasks = activeTasks.filter((task) => task.due_at && new Date(String(task.due_at)) < new Date());
+  const contentPropertyMap = useMemo(
+    () => new Map(contentProperties.map((property) => [String(property.id), property])),
+    [contentProperties],
+  );
+  const contentChannelMap = useMemo(
+    () => new Map(contentChannels.map((channel) => [String(channel.id), channel])),
+    [contentChannels],
+  );
+  const contentTypeMap = useMemo(
+    () => new Map(contentTypes.map((contentTypeRecord) => [String(contentTypeRecord.id), contentTypeRecord])),
+    [contentTypes],
+  );
+  const lupe = useMemo(
+    () => agents.find((agent) => text(agent.code || agent.name).toLowerCase() === "lupe"),
+    [agents],
+  );
+  const k2 = useMemo(
+    () => agents.find((agent) => text(agent.code || agent.name).toLowerCase() === "k2"),
+    [agents],
+  );
+
+  function contentProperty(item: RecordValue) {
+    return contentPropertyMap.get(String(item.property_id));
+  }
+
+  function contentChannel(item: RecordValue) {
+    return contentChannelMap.get(String(item.channel_id));
+  }
+
+  function contentPlatformForItem(item: RecordValue) {
+    return text(contentChannel(item)?.platform, "Unassigned");
+  }
+
+  function contentAccountName(item: RecordValue) {
+    return text(contentChannel(item)?.account_name, "Unassigned");
+  }
+
+  function contentPropertyName(item: RecordValue) {
+    return text(contentProperty(item)?.name, "Unknown property");
+  }
+
+  function contentTypeName(item: RecordValue) {
+    return text(contentTypeMap.get(String(item.content_type_id))?.name, "K2 to decide");
+  }
+
+  function openContent(item?: RecordValue) {
+    const nextItem = item || null;
+    setSelectedContent(nextItem);
+    setEvidenceFile(null);
+    setContentForm(nextItem ? {
+      title: text(nextItem.title, ""),
+      brief: text(nextItem.brief, ""),
+      body: text(nextItem.body, ""),
+      property_id: text(nextItem.property_id, ""),
+      channel_id: text(nextItem.channel_id, ""),
+      content_type_id: text(nextItem.content_type_id, ""),
+      owner_agent_id: text(nextItem.owner_agent_id, ""),
+      distribution_mode: text(nextItem.distribution_mode, "organic") as "organic" | "paid",
+      status: text(nextItem.status, "idea"),
+      publish_at: nextItem.publish_at ? new Date(String(nextItem.publish_at)).toISOString().slice(0, 16) : "",
+      final_url: text(nextItem.final_url, ""),
+      failure_message: text(nextItem.failure_message, ""),
+    } : EMPTY_CONTENT_FORM);
+    setDrawer("content");
+  }
+
+  function channelsForProperty(propertyId: string) {
+    return contentChannels.filter((channel) =>
+      String(channel.property_id) === propertyId && text(channel.status, "active") !== "archived"
+    );
+  }
+
+  async function saveContent() {
+    if (!contentForm.title.trim() || !contentForm.property_id || !contentForm.channel_id) {
+      setError("Content requires a title, property, and publishing channel.");
+      return;
+    }
 
     try {
       setError("");
-      await apiFetch(`/api/v1/${resource}/${record.id}`, { method: "DELETE" });
-      if (!session?.access_token) return;
-      await refreshOverview(session.access_token);
-      await refreshResource(session.access_token, resource);
-      if (selected?.id === record.id) closeDrawer();
-    } catch (deleteError) {
-      setError(deleteError instanceof Error ? deleteError.message : "The record could not be deleted.");
+      let screenshotPath = text(selectedContent?.screenshot_path, "");
+      if (evidenceFile) {
+        if (!session?.user.id) throw new Error("Your session expired.");
+        const extension = evidenceFile.name.split(".").pop()?.toLowerCase() || "png";
+        const objectPath = `${session.user.id}/${selectedContent?.id || crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`;
+        const { error: uploadError } = await supabase.storage
+          .from("content-publication-evidence")
+          .upload(objectPath, evidenceFile, {
+            cacheControl: "3600",
+            contentType: evidenceFile.type,
+            upsert: false,
+          });
+        if (uploadError) throw uploadError;
+        screenshotPath = objectPath;
+      }
+
+      const payload: RecordValue = {
+        title: contentForm.title.trim(),
+        brief: contentForm.brief.trim() || null,
+        body: contentForm.body.trim() || null,
+        property_id: contentForm.property_id,
+        channel_id: contentForm.channel_id,
+        content_type_id: contentForm.content_type_id || null,
+        owner_agent_id: contentForm.owner_agent_id || null,
+        research_owner_agent_id: k2?.id || null,
+        distribution_mode: contentForm.distribution_mode,
+        status: contentForm.status,
+        publish_at: contentForm.publish_at ? new Date(contentForm.publish_at).toISOString() : null,
+        final_url: contentForm.final_url.trim() || null,
+        screenshot_path: screenshotPath || null,
+        failure_message: contentForm.failure_message.trim() || null,
+      };
+
+      if (selectedContent) {
+        await request(`/api/v1/content-items/${selectedContent.id}`, {
+          method: "PATCH",
+          body: JSON.stringify(payload),
+        });
+      } else {
+        await request("/api/v1/content-items", {
+          method: "POST",
+          body: JSON.stringify(payload),
+        });
+      }
+
+      setDrawer(null);
+      setSelectedContent(null);
+      setContentForm(EMPTY_CONTENT_FORM);
+      setEvidenceFile(null);
+      if (session) await refreshAll(session.access_token);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save the content item.");
     }
   }
 
-  const filteredRecords = useMemo(() => {
-    const needle = deferredQuery.trim().toLowerCase();
-    if (!needle) return records;
+  async function advanceContent(item: RecordValue, nextStatus: string) {
+    try {
+      setError("");
+      await request(`/api/v1/content-items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ status: nextStatus }),
+      });
+      if (session) await refreshAll(session.access_token);
+    } catch (advanceError) {
+      setError(advanceError instanceof Error ? advanceError.message : "Could not advance the content item.");
+    }
+  }
 
-    return records.filter((record) =>
-      JSON.stringify(record).toLowerCase().includes(needle),
+  async function sendContentToTito(item: RecordValue) {
+    if (!lupe) {
+      setError("Lupe must exist in the agent roster before an approval package can be sent.");
+      return;
+    }
+    try {
+      setError("");
+      const approvalPayload = await request("/api/v1/approvals", {
+        method: "POST",
+        body: JSON.stringify({
+          content_item_id: item.id,
+          requested_by_agent_id: lupe.id,
+          reviewer_agent_id: lupe.id,
+          title: `Content approval: ${text(item.title)}`,
+          summary: text(item.brief || item.body, "Lupe has assembled this content item for Tito's review."),
+          evidence: [
+            `Property: ${contentPropertyName(item)}`,
+            `Channel: ${contentAccountName(item)}`,
+            `Format: ${contentTypeName(item)}`,
+            "K2 research should be referenced in the content record.",
+          ],
+          recommendation: "Review the final content and approve it for scheduling or request revisions.",
+          status: "pending",
+          due_at: item.publish_at || null,
+        }),
+      });
+      await request(`/api/v1/content-items/${item.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: "awaiting_tito",
+          approval_id: approvalPayload.data.id,
+        }),
+      });
+      if (session) await refreshAll(session.access_token);
+    } catch (approvalError) {
+      setError(approvalError instanceof Error ? approvalError.message : "Could not send the content package to Tito.");
+    }
+  }
+
+  function openAgent(agent: RecordValue) {
+    setSelectedAgent(agent);
+    setDrawer("agent");
+  }
+
+  function renderCommand() {
+    return (
+      <div className="commandView">
+        <section className="metricDeck">
+          <div><span>Open instructions</span><strong>{String(activeTasks.length).padStart(2, "0")}</strong><small>Across {agents.length} operating lanes</small></div>
+          <div><span>Due today</span><strong>{String(dueToday.length).padStart(2, "0")}</strong><small>Requires attention before close</small></div>
+          <div><span>Approval queue</span><strong>{String(pendingApprovals.length).padStart(2, "0")}</strong><small>Decision packages awaiting you</small></div>
+          <div><span>Daily reports</span><strong>{reporting}/{agents.length}</strong><small>{agents.length - reporting} lanes still silent</small></div>
+        </section>
+
+        <section className="deckPanel commandBrief">
+          <header className="panelHead"><div><span>Daily brief</span><h2>{todayLabel}</h2></div><small>Live operational readout</small></header>
+          <div className="briefSnapshot">
+            <div><span>Today’s focus</span><p>{dueToday.length || contentDueToday.length ? `${dueToday.length} instructions and ${contentDueToday.length} publications are due today. ${[...contentDueToday, ...dueToday].slice(0, 3).map((item) => text(item.title)).join(" · ")}` : "No instructions or publications are due today; use the window to clear review-stage work."}</p></div>
+            <div className={pendingApprovals.length ? "attention" : ""}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision.` : "No approval decisions are waiting."}</p></div>
+            <div className={blockedTasks.length || overdueTasks.length ? "attention" : ""}><span>Watch list</span><p>{blockedTasks.length || overdueTasks.length ? `${blockedTasks.length} blocked · ${overdueTasks.length} overdue. Lupe should resolve these before new work begins.` : "Nothing is blocked or overdue."}</p></div>
+            <div className={reporting < agents.length ? "attention" : ""}><span>Reporting</span><p>{reporting} of {agents.length} lanes have reported. {agents.length - reporting ? `${agents.length - reporting} updates are still missing.` : "The full roster is accounted for."}</p></div>
+          </div>
+        </section>
+
+        <div className="commandSnapshots">
+          <section className="deckPanel miniKanban">
+            <header className="panelHead"><div><span>Kanban snapshot</span><h2>Work in motion</h2></div><button className="textLink compactLink" onClick={() => setView("kanban")}>Open board →</button></header>
+            <div className="miniKanbanGrid">
+              {STATUS_COLUMNS.map((column) => {
+                const items = tasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
+                return <div key={column.id}><header><span>{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>{items.slice(0, 2).map((task) => <button key={String(task.id)} onClick={() => setView("kanban")}><b>{text(task.title)}</b><small>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</small></button>)}{!items.length && <p>Clear</p>}</div>;
+              })}
+            </div>
+          </section>
+
+          <section className="deckPanel todayCalendar">
+            <header className="panelHead"><div><span>Today’s calendar</span><h2>Content going live</h2></div><small>{contentDueToday.length} scheduled</small></header>
+            <div className="todaySchedule">
+              {contentDueToday.map((item) => (
+                <article key={String(item.id)}>
+                  <time>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</time>
+                  <div><b>{text(item.title)}</b><small>{contentAccountName(item)} · {contentTypeName(item)}</small></div>
+                  <span>{contentPlatformForItem(item)}</span>
+                </article>
+              ))}
+              {!contentDueToday.length && <div className="emptySchedule"><b>No content scheduled today.</b><span>Approved content appears here after Lupe records its publishing time.</span></div>}
+            </div>
+          </section>
+        </div>
+
+        <div className="commandGrid">
+          <section className="deckPanel teamPanel">
+            <header className="panelHead"><div><span>Roster state</span><h2>Agent operating lanes</h2></div><small>Click a lane to inspect</small></header>
+            {agents.map((agent) => {
+              const owned = activeTasks.filter((task) => String(task.owner_agent_id) === String(agent.id));
+              const update = latestUpdate.get(String(agent.id));
+              return (
+                <button className="teamRow" key={String(agent.id)} onClick={() => openAgent(agent)}>
+                  <span className="agentMark large">{initials(agent.code || agent.name)}</span>
+                  <span className="agentIdentity"><b>{text(agent.name || agent.code)}</b><small>{text(agent.role, "Agent")}</small></span>
+                  <span className="agentFocus">{text(agent.lane || agent.charter, "Operating lane")}</span>
+                  <strong>{String(owned.length).padStart(2, "0")}</strong>
+                  <span className="reportState"><b className={update ? "" : "missing"}>{update ? "Reported" : "Missing"}</b><small>{update ? dateLabel(update.update_date) : "No update"}</small></span>
+                </button>
+              );
+            })}
+          </section>
+
+          <div className="sideStack">
+            <section className="deckPanel">
+              <header className="panelHead"><div><span>Needs direction</span><h2>Approval queue</h2></div><small>{pendingApprovals.length} open</small></header>
+              {pendingApprovals.slice(0, 4).map((approval) => (
+                <button className="decisionRow" key={String(approval.id)} onClick={() => setView("approvals")}>
+                  <b>{text(approval.title, "Untitled approval")}</b>
+                  <small><i>Pending</i> · {dateLabel(approval.due_at)}</small>
+                </button>
+              ))}
+              {!pendingApprovals.length && <p className="opsEmpty">No decisions waiting.</p>}
+              <button className="textLink" onClick={() => setView("approvals")}>Open approval queue →</button>
+            </section>
+
+            <section className="deckPanel">
+              <header className="panelHead"><div><span className="dim">Today</span><h2>Due before close</h2></div><small>{dueToday.length}</small></header>
+              {dueToday.slice(0, 5).map((task) => (
+                <div className="dueRow" key={String(task.id)}><i /><span><b>{text(task.title)}</b><small>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</small></span></div>
+              ))}
+              {!dueToday.length && <p className="opsEmpty">Nothing due today.</p>}
+            </section>
+          </div>
+        </div>
+      </div>
     );
-  }, [deferredQuery, records]);
+  }
+
+  function renderList() {
+    return (
+      <section className="deckPanel ledger">
+        <header className="panelHead"><div><span>Instruction ledger</span><h2>{visibleTasks.length} visible instructions</h2></div><small>Live from Supabase</small></header>
+        <div className="ledgerHead"><span /><span>Instruction</span><span>Owner</span><span>Priority</span><span>Status</span><span>Due</span><span>Project</span></div>
+        {visibleTasks.map((task) => (
+          <div className="ledgerRow" key={String(task.id)}>
+            <button className={`squareCheck ${taskStatus(task) === "done" ? "done" : ""}`} onClick={() => void moveTask(task, taskStatus(task) === "done" ? "in_progress" : "done")} aria-label="Toggle completion"><i /></button>
+            <span className="instruction"><b className={taskStatus(task) === "done" ? "struck" : ""}>{text(task.title)}</b><small>{text(task.description, "No context documented")}</small></span>
+            <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</button>
+            <span className={text(task.priority) === "urgent" ? "urgent" : ""}>{text(task.priority, "medium")}</span>
+            <span className={`statusPill s${taskStatus(task).replace("_", "")}`}><i />{statusLabel(taskStatus(task))}</span>
+            <span>{dateLabel(task.due_at)}</span>
+            <span>{projectMap.get(String(task.project_id)) || "General"}</span>
+          </div>
+        ))}
+        {!visibleTasks.length && <p className="opsEmpty">No instructions match this view.</p>}
+        <footer>{busy ? "Synchronizing operations…" : "All changes write through the Lupe operations API."}</footer>
+      </section>
+    );
+  }
+
+  function renderKanban() {
+    return (
+      <div className="kanbanDeck">
+        {STATUS_COLUMNS.map((column) => {
+          const items = visibleTasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
+          return (
+            <section className="kanbanColumn" key={column.id}>
+              <header><span><i />{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>
+              <p>{column.note}</p>
+              <div>
+                {items.map((task) => (
+                  <article key={String(task.id)}>
+                    <header><span>{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
+                    <h3>{text(task.title)}</h3>
+                    <p>{text(task.description, "No context documented.")}</p>
+                    <footer><span><span className="agentMark">{initials(agentMap.get(String(task.owner_agent_id)))}</span>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</span>
+                      {column.id !== "done" && <button onClick={() => void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done")}>Advance →</button>}
+                    </footer>
+                  </article>
+                ))}
+              </div>
+              <button className="addInstruction" onClick={() => { setForm({ ...EMPTY_FORM, status: column.id }); setDrawer("task"); }}>+ Add instruction</button>
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
+
+  function renderWorkLogs() {
+    return (
+      <section className="deckPanel workLogPanel">
+        <header className="panelHead"><div><span>Documented execution</span><h2>{workLogs.length} work log entries</h2></div><small>Newest first</small></header>
+        <div className="workLogList">
+          {workLogs.map((log) => (
+            <article key={String(log.id)}>
+              <span className="agentMark">{initials(agentMap.get(String(log.agent_id)))}</span>
+              <div><header><b>{text(log.title, statusLabel(text(log.entry_type, "note")))}</b><span>{text(log.entry_type, "note")}</span></header><p>{text(log.body, "No narrative documented.")}</p><small>{agentMap.get(String(log.agent_id)) || "Unknown agent"} · {dateLabel(log.created_at)}{log.task_id ? ` · Task ${String(log.task_id).slice(0, 8)}` : ""}</small></div>
+            </article>
+          ))}
+          {!workLogs.length && <p className="opsEmpty">No work has been documented yet.</p>}
+        </div>
+      </section>
+    );
+  }
+
+  function renderContent() {
+    const platforms = [...new Set(contentChannels.map((channel) => text(channel.platform)).filter(Boolean))].sort();
+    const accounts = [...new Set(contentChannels.map((channel) => text(channel.account_name)).filter(Boolean))].sort();
+    const types = [...new Set(contentTypes.map((contentTypeRecord) => text(contentTypeRecord.name)).filter(Boolean))].sort();
+    const filteredContent = contentItems.filter((item) => {
+      const platformMatch = contentPlatform === "all" || contentPlatform === contentPlatformForItem(item);
+      const accountMatch = contentAccount === "all" || contentAccount === contentAccountName(item);
+      const typeMatch = contentType === "all" || contentType === contentTypeName(item);
+      const laneMatch = lane === "all" || String(item.owner_agent_id) === lane;
+      const searchMatch = !query.trim() || JSON.stringify(item).toLowerCase().includes(query.trim().toLowerCase());
+      return platformMatch && accountMatch && typeMatch && laneMatch && searchMatch;
+    });
+    const scheduled = filteredContent.filter((item) => ["scheduled", "publishing"].includes(text(item.status)));
+    const inReview = filteredContent.filter((item) => ["ready_for_lupe", "awaiting_tito", "revision_requested"].includes(text(item.status)));
+    const published = filteredContent.filter((item) => text(item.status) === "published");
+    return (
+      <div className="contentWorkspace">
+        <section className="metricDeck contentMetrics">
+          <div><span>Scheduled</span><strong>{String(scheduled.length).padStart(2, "0")}</strong><small>Approved content moving toward publication</small></div>
+          <div><span>With Tito</span><strong>{String(inReview.length).padStart(2, "0")}</strong><small>Lupe-managed review and revision packages</small></div>
+          <div><span>Published</span><strong>{String(published.length).padStart(2, "0")}</strong><small>Final URL and required evidence documented</small></div>
+          <div><span>Properties</span><strong>{contentProperties.filter((property) => text(property.status) === "active").length}</strong><small>{contentProperties.filter((property) => text(property.status) === "paused").length} property paused</small></div>
+        </section>
+
+        <section className="deckPanel contentSchedule">
+          <header className="panelHead"><div><span>Publishing desk</span><h2>Content operations</h2></div><button className="liveBtn" onClick={() => openContent()}>New content</button></header>
+          <div className="contentFilters">
+            <label>Platform<select value={contentPlatform} onChange={(event) => setContentPlatform(event.target.value)}><option value="all">All platforms</option>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select></label>
+            <label>Account<select value={contentAccount} onChange={(event) => setContentAccount(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select></label>
+            <label>Content type<select value={contentType} onChange={(event) => setContentType(event.target.value)}><option value="all">All content types</option>{types.map((type) => <option key={type} value={type}>{type}</option>)}</select></label>
+            {(contentPlatform !== "all" || contentAccount !== "all" || contentType !== "all") && <button className="ghostBtn" onClick={() => { setContentPlatform("all"); setContentAccount("all"); setContentType("all"); }}>Clear filters</button>}
+          </div>
+          <div className="contentHead"><span>Date</span><span>Content</span><span>Platform</span><span>Account</span><span>Owner</span><span>Stage</span><span /></div>
+          {filteredContent.map((item) => (
+            <article key={String(item.id)}>
+              <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
+              <button className="contentTitle contentTitleButton" onClick={() => openContent(item)}><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small></button>
+              <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
+              <span className="accountName">{contentAccountName(item)}</span>
+              <button className="ownerLink" onClick={() => { const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
+              <span className={`statusPill s${text(item.status).replaceAll("_", "")}`}><i />{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</span>
+              <span className="contentActions">
+                {["idea", "revision_requested"].includes(text(item.status)) && <button onClick={() => void advanceContent(item, "research_ready")}>Research ready</button>}
+                {text(item.status) === "research_ready" && <button onClick={() => void advanceContent(item, "drafting")}>Start draft</button>}
+                {text(item.status) === "drafting" && <button onClick={() => void advanceContent(item, "ready_for_lupe")}>Send to Lupe</button>}
+                {text(item.status) === "ready_for_lupe" && <button onClick={() => void sendContentToTito(item)}>Send to Tito</button>}
+                {text(item.status) === "approved" && <button onClick={() => openContent(item)}>{item.publish_at ? "Schedule" : "Set schedule"}</button>}
+                {text(item.status) === "scheduled" && <button onClick={() => void advanceContent(item, "publishing")}>Begin publishing</button>}
+                {["publishing", "failed"].includes(text(item.status)) && <button onClick={() => openContent(item)}>Record result</button>}
+                {text(item.status) === "published" && item.final_url && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
+              </span>
+            </article>
+          ))}
+          {!filteredContent.length && <div className="opsEmpty">{contentItems.length ? "No content matches the selected filters." : "No content records yet. Create the first item and move it through research, production, Tito approval, and publishing."}</div>}
+        </section>
+
+        <section className="deckPanel propertyPanel">
+          <header className="panelHead"><div><span>Properties</span><h2>Publishing destinations</h2></div><small>Configured operating map</small></header>
+          <div className="propertyGrid">
+            {contentProperties.map((property) => (
+              <article key={String(property.id)} className={text(property.status) === "paused" ? "paused" : ""}>
+                <header><b>{text(property.name)}</b><span>{text(property.status)}</span></header>
+                {contentChannels.filter((channel) => String(channel.property_id) === String(property.id)).map((channel) => (
+                  <div key={String(channel.id)}><span>{text(channel.platform)}</span><small>{text(channel.publishing_mode).replaceAll("_", " ")}</small></div>
+                ))}
+                <p>{text(property.notes, "No operating note.")}</p>
+              </article>
+            ))}
+          </div>
+        </section>
+      </div>
+    );
+  }
+
+  function renderApprovals() {
+    return (
+      <div className="approvalDeck">
+        {approvals.map((approval) => {
+          const decided = text(approval.status, "pending") !== "pending";
+          return (
+            <article className={`deckPanel approvalCard ${decided ? "decided" : ""}`} key={String(approval.id)}>
+              <header><div><span>{text(approval.status, "pending")}</span><h2>{text(approval.title, "Untitled decision")}</h2></div><b>{dateLabel(approval.due_at)}</b></header>
+              <div className="approvalBody">
+                <div><span>Summary</span><p>{text(approval.summary, "No summary documented.")}</p></div>
+                <div><span>Recommendation</span><p>{text(approval.recommendation, "No recommendation documented.")}</p></div>
+                <div><span>Risk</span><p>{text(approval.risk, "No risk documented.")}</p></div>
+              </div>
+              {!decided && <footer><button className="liveBtn" onClick={() => void decide(approval, "approved")}>Approve</button><button className="outlineBtn" onClick={() => void decide(approval, "changes_requested")}>Request changes</button><button className="ghostBtn" onClick={() => void decide(approval, "declined")}>Decline</button></footer>}
+            </article>
+          );
+        })}
+        {!approvals.length && <section className="deckPanel opsEmpty">No approval packages have been submitted.</section>}
+      </div>
+    );
+  }
 
   return (
-    <div className="opsShell">
-      <aside className="opsRail">
+    <div className="deck">
+      <aside className="rail">
         <div className="deckBrand">
+          {/* Vinext's dev runtime does not currently support next/image reliably. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/herzen-logo-white.png" alt="Herzen Co." />
-          <span>Operational Command Center</span>
+          <span>Operations Control Center</span>
         </div>
         <div className="rule" />
-
-        <div className="opsIdentity">
-          <span className="railLabel">Operator</span>
-          <strong>{overview?.viewer.display_name || "Lupe"}</strong>
-          <small>{overview?.viewer.role || "operator"}</small>
-        </div>
-
-        <nav className="opsNav">
-          {RESOURCE_CONFIGS.map((item) => (
-            <button
-              key={item.name}
-              className={item.name === resource ? "active" : ""}
-              onClick={() => {
-                setQuery("");
-                setResource(item.name);
-              }}
-            >
-              <span>{item.label}</span>
-              <em>{item.name === "tasks" ? overview?.counts.tasks ?? records.length : item.name === "agents" ? overview?.counts.agents ?? records.length : ""}</em>
+        <nav className="deckNav">
+          {VIEWS.map((item) => (
+            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
+              <i /><span>{item.label}</span><em>{item.id === "approvals" ? String(pendingApprovals.length).padStart(2, "0") : item.id === "list" ? String(tasks.length).padStart(2, "0") : item.id === "worklogs" ? String(workLogs.length).padStart(2, "0") : item.id === "content" ? String(contentItems.length).padStart(2, "0") : ""}</em>
             </button>
           ))}
         </nav>
-
-        <div className="opsStats">
-          <div>
-            <span>Open tasks</span>
-            <strong>{overview?.counts.open_tasks ?? EMPTY_COUNTS.open_tasks}</strong>
-          </div>
-          <div>
-            <span>Pending approvals</span>
-            <strong>{overview?.counts.pending_approvals ?? EMPTY_COUNTS.pending_approvals}</strong>
-          </div>
-          <div>
-            <span>Projects</span>
-            <strong>{overview?.counts.projects ?? EMPTY_COUNTS.projects}</strong>
-          </div>
-        </div>
-
-        <form action="/api/auth/logout" method="post" className="opsSignOut">
-          <button type="submit" className="signOut">Sign out</button>
-        </form>
+        <section className="roster">
+          <span className="railLabel">Agent spaces</span>
+          {agents.map((agent) => (
+            <button key={String(agent.id)} onClick={() => openAgent(agent)}>
+              <span className="agentMark">{initials(agent.code || agent.name)}</span><span>{text(agent.name || agent.code)}</span><i className={text(agent.status, "active") === "active" ? "online" : ""} />
+            </button>
+          ))}
+          <p><b>{overview?.viewer.display_name || "Lupe"}</b><br />{overview?.viewer.role || "operator"} access</p>
+          <form action="/api/auth/logout" method="post"><button className="signOut" type="submit">Sign out</button></form>
+        </section>
       </aside>
 
-      <main className="opsMain">
-        <header className="opsHeader">
-          <div className="titleBlock">
-            <span className="liveLabel"><i />Live operations</span>
-            <h1>{config.label}</h1>
-            <p>{config.description}</p>
+      <main className="deckMain">
+        <header className="deckHeader">
+          <div className="titleBlock"><span className="liveLabel"><i />Live operation</span><h1>{VIEWS.find((item) => item.id === view)?.label}</h1><p>Direction enters here. Execution leaves documented.</p></div>
+          <div className="headerActions">
+            <label className="deckSearch"><span>/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search instructions" /></label>
+            <button className="outlineBtn" onClick={() => setDrawer("brief")}>Daily brief</button>
+            <button className="liveBtn" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New instruction</button>
           </div>
-
-          <div className="opsToolbar">
-            <label className="deckSearch">
-              <span>/</span>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder={`Search ${config.label.toLowerCase()}`}
-              />
-            </label>
-            <button
-              className="outlineBtn"
-              onClick={() => {
-                if (!session?.access_token) return;
-                startTransition(() => {
-                  void refreshOverview(session.access_token);
-                  void refreshResource(session.access_token, resource);
-                });
-              }}
-            >
-              Refresh
-            </button>
-            {config.mutable && (
-              <button className="liveBtn" onClick={openCreateDrawer}>
-                New {config.singular}
-              </button>
-            )}
-          </div>
+          <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}</div>
         </header>
 
-        <section className="opsBody">
-          {error ? <div className="opsError">{error}</div> : null}
-
-          <div className="metricDeck opsMetricDeck">
-            <div>
-              <span>Loaded</span>
-              <strong>{records.length}</strong>
-              <small>Records fetched for this resource</small>
-            </div>
-            <div>
-              <span>Filtered</span>
-              <strong>{filteredRecords.length}</strong>
-              <small>Visible after search</small>
-            </div>
-            <div>
-              <span>Viewer role</span>
-              <strong>{overview?.viewer.role || "operator"}</strong>
-              <small>Write access required for mutations</small>
-            </div>
-            <div>
-              <span>Status</span>
-              <strong>{busy ? "Syncing" : "Ready"}</strong>
-              <small>{config.mutable ? "CRUD enabled" : "Read-only audit trail"}</small>
-            </div>
-          </div>
-
-          <div className="opsGrid">
-            <section className="deckPanel opsListPanel">
-              <div className="panelHead">
-                <div>
-                  <span>{config.label}</span>
-                  <h2>{filteredRecords.length} visible records</h2>
-                </div>
-                <small>{config.mutable ? "Create, edit, delete" : "Read only"}</small>
-              </div>
-
-              <div className="opsList">
-                {filteredRecords.map((record) => (
-                  <article key={String(record.id)} className="opsCard">
-                    <button
-                      className="opsCardMain"
-                      onClick={() => {
-                        if (config.mutable) {
-                          openEditDrawer(record);
-                          return;
-                        }
-                        inspectRecord(record);
-                      }}
-                    >
-                      <div className="opsCardTitle">
-                        <strong>{String(record.title || record.name || record.code || record.id || "Untitled")}</strong>
-                        <small>{String(record.status || record.role || record.entry_type || record.action || config.singular)}</small>
-                      </div>
-                      <dl className="opsMeta">
-                        {Object.entries(record)
-                          .filter(([key]) => !["before_data", "after_data", "metadata"].includes(key))
-                          .slice(0, 6)
-                          .map(([key, value]) => (
-                            <div key={key}>
-                              <dt>{formatLabel(key)}</dt>
-                              <dd>{stringifyValue(value)}</dd>
-                            </div>
-                          ))}
-                      </dl>
-                    </button>
-
-                    {config.mutable ? (
-                      <div className="opsCardActions">
-                        <button className="outlineBtn" onClick={() => openEditDrawer(record)}>Edit</button>
-                        <button className="dangerBtn" onClick={() => void handleDelete(record)}>Delete</button>
-                      </div>
-                    ) : null}
-                  </article>
-                ))}
-
-                {!filteredRecords.length ? (
-                  <div className="opsEmpty">No records matched this view.</div>
-                ) : null}
-              </div>
-            </section>
-
-            <section className="deckPanel opsDetailPanel">
-              <div className="panelHead">
-                <div>
-                  <span>{drawerMode ? (drawerMode === "create" ? "Create" : "Edit") : "Inspect"}</span>
-                  <h2>
-                    {drawerMode
-                      ? `${drawerMode === "create" ? "New" : "Edit"} ${config.singular}`
-                      : "Select a record"}
-                  </h2>
-                </div>
-              </div>
-
-              {drawerMode ? (
-                <div className="opsForm">
-                  {config.fields.map((field) => {
-                    const options = fieldOptions(field, overview);
-                    const value = form[field.name] || "";
-
-                    return (
-                      <label key={field.name}>
-                        {field.label}
-                        {field.kind === "textarea" ? (
-                          <textarea
-                            value={value}
-                            onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
-                            placeholder={field.placeholder}
-                          />
-                        ) : field.kind === "select" ? (
-                          <select
-                            value={value}
-                            onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
-                          >
-                            <option value="">Select</option>
-                            {options?.map((option) => (
-                              <option key={option.value} value={option.value}>{option.label}</option>
-                            ))}
-                          </select>
-                        ) : (
-                          <input
-                            type={field.kind === "date" ? "datetime-local" : "text"}
-                            value={value}
-                            onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
-                            placeholder={field.placeholder}
-                          />
-                        )}
-                        {field.helper ? <small>{field.helper}</small> : null}
-                      </label>
-                    );
-                  })}
-
-                  <div className="opsFormActions">
-                    <button className="ghostBtn" onClick={closeDrawer}>Cancel</button>
-                    <button className="liveBtn" onClick={() => void handleSave()}>
-                      {drawerMode === "create" ? "Create" : "Save"}
-                    </button>
-                  </div>
-                </div>
-              ) : selected ? (
-                <pre className="opsInspect">{JSON.stringify(selected, null, 2)}</pre>
-              ) : (
-                <div className="opsEmpty opsEmptyDetail">
-                  Choose a record to inspect or edit, or create a new one.
-                </div>
-              )}
-            </section>
-          </div>
+        <section className="deckContent">
+          {error && <div className="opsError">{error}</div>}
+          {view === "command" && renderCommand()}
+          {view === "list" && renderList()}
+          {view === "kanban" && renderKanban()}
+          {view === "worklogs" && renderWorkLogs()}
+          {view === "content" && renderContent()}
+          {view === "approvals" && renderApprovals()}
         </section>
       </main>
+
+      {drawer && (
+        <div className="drawerShade" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawer(null); }}>
+          <aside className="deckDrawer">
+            <button className="drawerClose" onClick={() => setDrawer(null)}>Close</button>
+            {drawer === "task" && (
+              <form onSubmit={(event) => { event.preventDefault(); void createTask(); }}>
+                <span className="liveLabel"><i />New instruction</span><h2>Put direction into motion.</h2><p>Assign the lane, context, due date, and definition of done. Lupe and the agent roster will work from this record.</p>
+                <label>Instruction<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="What needs to happen?" /></label>
+                <label>Context<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
+                <div className="formPair"><label>Agent<select value={form.owner_agent_id} onChange={(event) => setForm({ ...form, owner_agent_id: event.target.value })}><option value="">Unassigned</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
+                  <label>Project<select value={form.project_id} onChange={(event) => setForm({ ...form, project_id: event.target.value })}><option value="">General</option>{projects.map((project) => <option key={String(project.id)} value={String(project.id)}>{text(project.name || project.slug)}</option>)}</select></label></div>
+                <div className="formPair"><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Due<input type="datetime-local" value={form.due_at} onChange={(event) => setForm({ ...form, due_at: event.target.value })} /></label></div>
+                <label>Definition of done<textarea value={form.definition_of_done} onChange={(event) => setForm({ ...form, definition_of_done: event.target.value })} /></label>
+                <button className="liveBtn full" type="submit">Issue instruction</button>
+              </form>
+            )}
+            {drawer === "content" && (
+              <form onSubmit={(event) => { event.preventDefault(); void saveContent(); }}>
+                <span className="liveLabel"><i />Content operations</span>
+                <h2>{selectedContent ? "Document the work and its outcome." : "Create a content instruction."}</h2>
+                <p>Every item uses K2 research, passes through Lupe, and requires Tito approval before it can be scheduled or published.</p>
+                <label>Title<input value={contentForm.title} onChange={(event) => setContentForm({ ...contentForm, title: event.target.value })} placeholder="What are we publishing?" /></label>
+                <label>Brief<textarea value={contentForm.brief} onChange={(event) => setContentForm({ ...contentForm, brief: event.target.value })} placeholder="Audience, objective, offer, and required context." /></label>
+                <label>Draft / final copy<textarea className="contentBodyField" value={contentForm.body} onChange={(event) => setContentForm({ ...contentForm, body: event.target.value })} placeholder="Document the working or final content here." /></label>
+                <div className="formPair">
+                  <label>Property
+                    <select value={contentForm.property_id} onChange={(event) => {
+                      const propertyId = event.target.value;
+                      const availableChannels = channelsForProperty(propertyId);
+                      setContentForm({
+                        ...contentForm,
+                        property_id: propertyId,
+                        channel_id: availableChannels.some((channel) => String(channel.id) === contentForm.channel_id)
+                          ? contentForm.channel_id
+                          : String(availableChannels[0]?.id || ""),
+                      });
+                    }}>
+                      <option value="">Choose property</option>
+                      {contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)} disabled={text(property.status) === "paused"}>{text(property.name)}{text(property.status) === "paused" ? " — paused" : ""}</option>)}
+                    </select>
+                  </label>
+                  <label>Channel
+                    <select value={contentForm.channel_id} onChange={(event) => setContentForm({ ...contentForm, channel_id: event.target.value })}>
+                      <option value="">Choose channel</option>
+                      {channelsForProperty(contentForm.property_id).map((channel) => <option key={String(channel.id)} value={String(channel.id)} disabled={text(channel.status) === "paused"}>{text(channel.platform)} · {text(channel.account_name)}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <div className="formPair">
+                  <label>Content type
+                    <select value={contentForm.content_type_id} onChange={(event) => setContentForm({ ...contentForm, content_type_id: event.target.value })}>
+                      <option value="">K2 to decide</option>
+                      {contentTypes.filter((entry) => ["active", "proposed"].includes(text(entry.status))).map((entry) => <option key={String(entry.id)} value={String(entry.id)}>{text(entry.name)} · {text(entry.status)}</option>)}
+                    </select>
+                  </label>
+                  <label>Distribution
+                    <select value={contentForm.distribution_mode} onChange={(event) => {
+                      const distribution = event.target.value as "organic" | "paid";
+                      const preferredCode = distribution === "paid" ? "rex" : "c-3po";
+                      const preferredOwner = agents.find((agent) => text(agent.code).toLowerCase() === preferredCode);
+                      setContentForm({ ...contentForm, distribution_mode: distribution, owner_agent_id: String(preferredOwner?.id || contentForm.owner_agent_id) });
+                    }}>
+                      <option value="organic">Organic</option>
+                      <option value="paid">Paid</option>
+                    </select>
+                  </label>
+                </div>
+                <div className="formPair">
+                  <label>Owner
+                    <select value={contentForm.owner_agent_id} onChange={(event) => setContentForm({ ...contentForm, owner_agent_id: event.target.value })}>
+                      <option value="">Unassigned</option>
+                      {agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}
+                    </select>
+                  </label>
+                  <label>Status
+                    <select value={contentForm.status} onChange={(event) => setContentForm({ ...contentForm, status: event.target.value })}>
+                      {Object.entries(CONTENT_STATUS_LABELS).map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+                    </select>
+                  </label>
+                </div>
+                <label>Publish date and time<input type="datetime-local" value={contentForm.publish_at} onChange={(event) => setContentForm({ ...contentForm, publish_at: event.target.value })} /></label>
+                <label>Final published URL<input type="url" value={contentForm.final_url} onChange={(event) => setContentForm({ ...contentForm, final_url: event.target.value })} placeholder="https://…" /></label>
+                <label>Publication screenshot
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} />
+                  <small>{selectedContent?.screenshot_path ? "Screenshot evidence is already stored. Select a new file only to replace the recorded path." : "Required when an Instagram item is marked published. Stored privately in Supabase."}</small>
+                </label>
+                <label>Failure or blocker detail<textarea value={contentForm.failure_message} onChange={(event) => setContentForm({ ...contentForm, failure_message: event.target.value })} placeholder="Required when status is Failed." /></label>
+                {selectedContent && (
+                  <div className="contentHistory">
+                    <span>Status history</span>
+                    {contentHistory.filter((event) => String(event.content_item_id) === String(selectedContent.id)).slice(0, 8).map((event) => (
+                      <div key={String(event.id)}><b>{event.from_status ? `${CONTENT_STATUS_LABELS[text(event.from_status)] || text(event.from_status)} → ` : ""}{CONTENT_STATUS_LABELS[text(event.to_status)] || text(event.to_status)}</b><small>{dateLabel(event.created_at)}</small></div>
+                    ))}
+                  </div>
+                )}
+                <button className="liveBtn full" type="submit">{selectedContent ? "Save content record" : "Create content record"}</button>
+              </form>
+            )}
+            {drawer === "agent" && selectedAgent && (() => {
+              const mine = tasks.filter((task) => String(task.owner_agent_id) === String(selectedAgent.id));
+              const update = latestUpdate.get(String(selectedAgent.id));
+              return <div><div className="agentDrawerHead"><span className="agentMark large">{initials(selectedAgent.code || selectedAgent.name)}</span><div><span className="liveLabel"><i />Agent space</span><h2>{text(selectedAgent.name || selectedAgent.code)}</h2></div></div><p>{text(selectedAgent.charter || selectedAgent.lane, "No charter documented.")}</p>
+                <div className="agentStats"><div><b>{mine.filter((task) => !["done", "cancelled"].includes(taskStatus(task))).length}</b><span>Open</span></div><div><b>{mine.filter((task) => taskStatus(task) === "review").length}</b><span>Review</span></div><div><b>{mine.filter((task) => taskStatus(task) === "done").length}</b><span>Closed</span></div></div>
+                <h3>Instructions</h3>{mine.map((task) => <button className="drawerTask" key={String(task.id)} onClick={() => { setLane(String(selectedAgent.id)); setView("list"); setDrawer(null); }}><span>{statusLabel(taskStatus(task))}</span><b>{text(task.title)}</b><small>{dateLabel(task.due_at)}</small></button>)}
+                <h3>Latest daily update</h3>{update ? <><div className="briefLine"><span>Summary</span><p>{text(update.summary)}</p></div><div className="briefLine"><span>Blockers</span><p>{Array.isArray(update.blockers) ? update.blockers.join(" · ") : text(update.blockers, "None reported")}</p></div><div className="briefLine"><span>Next</span><p>{Array.isArray(update.next_steps) ? update.next_steps.join(" · ") : text(update.next_steps, "Not reported")}</p></div></> : <p>No daily update has been submitted.</p>}</div>;
+            })()}
+            {drawer === "brief" && (
+              <div><span className="liveLabel"><i />Daily brief</span><h2>Operational state at a glance.</h2><p>Generated from the live instruction ledger, approval queue, and most recent agent reports.</p>
+                <div className="briefLine"><span>Open</span><p>{activeTasks.length} instructions remain open across {agents.length} agent lanes.</p></div>
+                <div className="briefLine"><span>Due today</span><p>{dueToday.length || contentDueToday.length ? [...contentDueToday, ...dueToday].map((item) => text(item.title)).join(" · ") : "Nothing is due before close."}</p></div>
+                <div className="briefLine"><span>Decisions</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval packages await direction.` : "The approval queue is clear."}</p></div>
+                <div className="briefLine"><span>Reporting</span><p>{reporting} of {agents.length} agents have a documented update.</p></div>
+                <div className="briefRecommendation"><span>Lupe recommendation</span><p>{pendingApprovals.length ? "Clear the approval queue first, then close the oldest review-stage instructions." : "Focus the team on today’s due work and close review-stage instructions."}</p></div>
+              </div>
+            )}
+          </aside>
+        </div>
+      )}
     </div>
   );
 }

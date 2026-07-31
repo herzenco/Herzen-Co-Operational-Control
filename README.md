@@ -1,4 +1,25 @@
-# vinext-starter
+# Herzen Co. Operations Control Center
+
+Start with the project documentation:
+
+- [`docs/LUPE_HANDOFF_AND_ROADMAP.md`](docs/LUPE_HANDOFF_AND_ROADMAP.md) — what
+  is implemented, how Lupe should operate it, current boundaries, and what to
+  build next.
+- [`docs/LUPE_OPERATIONS_API.md`](docs/LUPE_OPERATIONS_API.md) — authentication,
+  endpoints, resources, payloads, and API operating guidance.
+- [`Operations Control Center - Capabilities and Operating Guide.md`](Operations%20Control%20Center%20-%20Capabilities%20and%20Operating%20Guide.md) —
+  original product capabilities and operating vision.
+
+## Local development
+
+```bash
+npm install
+npm run dev -- --host 0.0.0.0 --port 4000
+```
+
+The authenticated application is available at `http://localhost:4000`.
+
+## Runtime foundation
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and

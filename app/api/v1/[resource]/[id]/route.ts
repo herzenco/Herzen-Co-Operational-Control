@@ -47,6 +47,43 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     .select()
     .single();
   if (error || !data) return fail(400, "write_failed", error?.message || "The record could not be updated.");
+
+  if (resourceName === "approvals" && data.content_item_id && body.status && body.status !== "pending") {
+    const contentUpdate =
+      body.status === "approved"
+        ? {
+            status: "approved",
+            approved_by: context.user.id,
+            approved_at: new Date().toISOString(),
+            approval_id: data.id,
+          }
+        : body.status === "changes_requested"
+          ? {
+              status: "revision_requested",
+              approved_by: null,
+              approved_at: null,
+              approval_id: data.id,
+            }
+          : {
+              status: "cancelled",
+              approved_by: null,
+              approved_at: null,
+              approval_id: data.id,
+            };
+
+    const { error: contentError } = await context.supabase
+      .from("content_items")
+      .update(contentUpdate)
+      .eq("id", data.content_item_id);
+
+    if (contentError) {
+      return fail(409, "content_sync_failed", contentError.message, {
+        approval_id: data.id,
+        approval_status: data.status,
+      });
+    }
+  }
+
   return ok(data);
 }
 

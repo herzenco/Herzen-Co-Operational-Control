@@ -1,0 +1,10 @@
+create index content_properties_created_by_idx on public.content_properties(created_by) where created_by is not null;
+create index content_channels_created_by_idx on public.content_channels(created_by) where created_by is not null;
+create index content_types_recommended_by_idx on public.content_types(recommended_by_agent_id) where recommended_by_agent_id is not null;
+create index content_types_created_by_idx on public.content_types(created_by) where created_by is not null;
+create index content_items_content_type_idx on public.content_items(content_type_id) where content_type_id is not null;
+create index content_items_research_owner_idx on public.content_items(research_owner_agent_id) where research_owner_agent_id is not null;
+create index content_items_task_idx on public.content_items(task_id) where task_id is not null;
+create index content_items_approved_by_idx on public.content_items(approved_by) where approved_by is not null;
+create index content_items_created_by_idx on public.content_items(created_by) where created_by is not null;
+create index content_status_history_changed_by_idx on public.content_status_history(changed_by) where changed_by is not null;
