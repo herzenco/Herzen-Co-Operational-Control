@@ -22,15 +22,16 @@ npm run dev -- --host 0.0.0.0 --port 4000
 
 The authenticated application is available at `http://localhost:4000`.
 
-## Content migration helpers
+## Content operations helper scripts
 
-These scripts help move Herzen Co. content operations out of the older Content
-Engine workflow and into the Operations Control Center.
+These scripts support Command Center content operations. The default direction
+is OCC-native, blank-slate workflow design. The legacy bridge exists only for
+cases where older records need to be reconciled into OCC.
 
 - `node scripts/import-legacy-content-state.mjs`
   - Imports planned or scheduled items from
     `/Users/tito/.openclaw/workspace/memory/herzenco-content-automation-state.json`
-    into OCC content records.
+    into OCC content records when legacy reconciliation is explicitly needed.
 - `node scripts/tomorrow-content-review-pack.mjs`
   - Prints tomorrow's scheduled OCC content items in a review-pack format.
 
@@ -38,6 +39,17 @@ Required environment for both scripts:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `SUPABASE_SERVICE_ROLE_KEY`
+
+## Production API reality check
+
+The protected API is live at `https://operations.herzenco.co/api/v1`.
+
+- Unauthenticated `GET /api/v1` currently returns `401 unauthorized`.
+- The live response message is:
+  `Send a Supabase access token as Authorization: Bearer <token>.`
+- `https://operations.herzenco.co/login` is publicly reachable.
+- Protected API work still requires a live Supabase session from
+  `POST /api/v1/auth/token` or `POST /api/v1/auth/refresh`.
 
 ## Runtime foundation
 

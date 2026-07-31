@@ -61,3 +61,16 @@ This file tracks meaningful work performed in the Operational Command Center rep
 ### Verification
 
 - Not yet executed against live Supabase in this session because the reroute work depends on the active project credentials and target data state.
+
+### Repo and API sync
+
+- Synced the real `Herzen-Co-Operational-Control` repo and continued work on branch `Lupe`.
+- Verified the production API surface at `https://operations.herzenco.co/api/v1`.
+- Confirmed the live unauthenticated behavior matches the route guard:
+  `401 unauthorized` with `Send a Supabase access token as Authorization: Bearer <token>.`
+- Confirmed `https://operations.herzenco.co/login` is publicly reachable.
+- Corrected API docs to use local port `4000` instead of stale `3000`.
+- Updated the repo language so OCC is the default clean-slate workflow and the
+  legacy Content Engine bridge is documented as optional reconciliation only.
+- Added `SUPABASE_SERVICE_ROLE_KEY` to `.env.example` because the helper
+  scripts require it but the example config did not include it.
