@@ -849,6 +849,20 @@ export function CommandCenter() {
 
   return (
     <div className="deck">
+      <header className="mobileCommandHeader">
+        <div className="mobileStatus"><span>OCC · Secure</span><span className="mobileLink"><i />Link stable</span><span>100%</span></div>
+        <div className="mobileTitleRow">
+          <span className="mobileMark"><img src="/herzen-mark-white.png" alt="" /></span>
+          <div><span className="liveLabel"><i />Live operation</span><h1>{VIEWS.find((item) => item.id === view)?.label}</h1></div>
+          <button className="mobileNew" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New</button>
+        </div>
+        <nav className="mobileViewStrip" aria-label="Operations views">
+          {VIEWS.map((item) => (
+            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.label}</button>
+          ))}
+        </nav>
+      </header>
+
       <aside className="rail">
         <div className="deckBrand">
           {/* Vinext's dev runtime does not currently support next/image reliably. */}
@@ -897,6 +911,19 @@ export function CommandCenter() {
           {view === "approvals" && renderApprovals()}
         </section>
       </main>
+
+      <nav className="mobileBottomNav" aria-label="Primary mobile navigation">
+        {([
+          { id: "command" as View, label: "Today", badge: "" },
+          { id: "list" as View, label: "Work", badge: String(tasks.length).padStart(2, "0") },
+          { id: "content" as View, label: "Content", badge: String(contentItems.length).padStart(2, "0") },
+          { id: "approvals" as View, label: "Queue", badge: String(pendingApprovals.length).padStart(2, "0") },
+        ]).map((item) => (
+          <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
+            <i /><span>{item.label}</span>{item.badge && <em>{item.badge}</em>}
+          </button>
+        ))}
+      </nav>
 
       {drawer && (
         <div className="drawerShade" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawer(null); }}>
