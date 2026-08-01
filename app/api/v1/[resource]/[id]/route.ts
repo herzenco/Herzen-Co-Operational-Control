@@ -49,6 +49,9 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     payload.completed_at = new Date().toISOString();
   }
   if (resourceName === "approvals" && body.status && body.status !== "pending") {
+    if (["changes_requested", "declined"].includes(String(body.status)) && !String(body.decision_note || "").trim()) {
+      return fail(422, "rejection_reason_required", "A written rejection reason is required for Lupe and the content owner.");
+    }
     payload.decided_by = context.user.id;
     payload.decided_at = new Date().toISOString();
   }
@@ -65,7 +68,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const contentUpdate =
       body.status === "approved"
         ? {
-            status: "approved",
+            status: body.schedule_content === true ? "scheduled" : "approved",
             approved_by: context.user.id,
             approved_at: new Date().toISOString(),
             approval_id: data.id,

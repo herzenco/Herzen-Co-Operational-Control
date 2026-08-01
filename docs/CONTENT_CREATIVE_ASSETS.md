@@ -63,11 +63,11 @@ The first command is a dry run. `--apply` uploads missing manifest-selected orig
 3. Enter the final Caption.
 4. Select the Post image file.
 5. Save. OCC uploads the creative first, then stores its private path on the content record.
-6. Open the record to preview or download the original creative.
+6. Open the record to preview or download the original creative. Suggested Instagram posts also expose one-click **Copy caption** and **Download image** controls on the desktop mockup and directly on each mobile swipe card.
 7. After publishing, attach the separate Publication screenshot as proof.
 
 ## Tito review in Content
 
-Opening a post exposes the final caption, creative, and a direct review decision. **Approve & schedule** records the approval and, when `publish_at` exists, immediately moves the item to `scheduled` so it appears on the publishing calendar. **Reject with feedback** requires a written decision note, moves the item to `revision_requested`, and retains the note in the Content page's Rejected section for Lupe.
+Opening an Instagram post presents a post-style mockup with the final caption, creative, and direct review controls. **Approve & schedule** records the approval and, when `publish_at` exists, immediately moves the item to `scheduled` so it appears on the publishing calendar. **Reject** opens a required-reason dialog, moves the item to `revision_requested`, and retains the note in the Content page's Rejected section for Lupe and the content owner.
 
-The Rejected section is institutional memory, not a transient notification. Lupe should consult prior feedback when revising a post and before assembling later approval packages. Mobile Content presents posts as horizontally swipeable, caption-first cards; opening a card provides the same approval controls as desktop.
+The Rejected section is institutional memory, not a transient notification. It is reconstructed from immutable `activity_log` snapshots of approval decisions, so approving a later revision cannot erase the prior rejection. Lupe and C-3PO should consult this history when revising a post and before assembling later approval packages. Mobile Content presents Instagram posts as horizontally swipeable, creative-and-caption cards with the same Approve and Reject controls available directly on every reviewable card. Copy and download tools remain available after approval so a manually published Instagram post can still be retrieved without reopening edit mode.

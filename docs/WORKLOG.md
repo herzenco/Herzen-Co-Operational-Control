@@ -105,3 +105,12 @@ This file tracks meaningful work performed in the Operational Command Center rep
 - Extended the August repair to reuse/upload deterministic private Storage objects, populate canonical caption and creative path fields, preserve the original local path as provenance, and replace `metadata.image_url` with a stable `storage://` reference.
 - Added API write normalization that copies metadata captions and rejects unresolved local image paths with an actionable 422 response.
 - Preserved direct rendering for valid existing `http://` and `https://` image URLs and graceful placeholders for missing/broken values.
+
+### Instagram approval deck
+
+- Replaced the generic content preview with a post-style Instagram mockup containing the stored creative and final caption.
+- Added direct Approve and Reject controls on desktop and on each mobile review card; mobile cards use native horizontal scroll snapping to move between posts.
+- Added one-click Copy caption and Download image controls to the desktop Instagram mockup and every mobile Instagram card, with accessible success/error feedback and original filename preservation.
+- Changed rejection into a focused dialog with mandatory written feedback addressed to Lupe and the content owner.
+- Made the Rejected section durable by reading immutable approval snapshots from `activity_log`, so later approval of a revision does not overwrite earlier feedback.
+- Added server-side rejection-reason enforcement and allowed approval to move dated posts directly into `scheduled` in the linked content synchronization.

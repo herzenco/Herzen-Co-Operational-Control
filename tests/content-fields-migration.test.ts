@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { contentCreativeExternalUrl, contentCreativePath, isLocalContentAsset, serializeApiResource } from "../utils/content-assets";
+import { contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath, isLocalContentAsset, serializeApiResource } from "../utils/content-assets";
 import { normalizeContentWrite } from "../utils/content-write";
 import { parsePostManifest } from "../scripts/backfill-bubbles-creatives.mjs";
 
@@ -55,6 +55,12 @@ test("hosted metadata references resolve while local Assets paths do not", () =>
   assert.equal(contentCreativePath({ metadata: { image_url: "Assets/day-12.jpg" } }), "");
   assert.equal(contentCreativeExternalUrl({ metadata: { image_url: "https://images.example.com/day-12.jpg" } }), "https://images.example.com/day-12.jpg");
   assert.equal(isLocalContentAsset("Assets/day-12.jpg"), true);
+});
+
+test("creative downloads preserve a safe original filename and extension", () => {
+  assert.equal(contentCreativeDownloadName({ creative_asset_path: "operator/bubbles/day 12.webp" }), "day-12.webp");
+  assert.equal(contentCreativeDownloadName({ metadata: { image_url: "https://images.example.com/posts/day%2013.png?size=large" } }), "day-13.png");
+  assert.equal(contentCreativeDownloadName({ title: "A Salty Summer Post" }), "a-salty-summer-post.jpg");
 });
 
 test("content writes reject unresolved local files but preserve hosted URLs", () => {

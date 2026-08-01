@@ -37,6 +37,32 @@ export function contentCreativeExternalUrl(record: ContentRecord): string {
   return typeof imageUrl === "string" && /^https?:\/\//i.test(imageUrl.trim()) ? imageUrl.trim() : "";
 }
 
+export function contentCreativeDownloadName(record: ContentRecord): string {
+  const storedPath = contentCreativePath(record);
+  const externalUrl = contentCreativeExternalUrl(record);
+  let sourceName = storedPath.split("/").at(-1) || "";
+  if (!sourceName && externalUrl) {
+    try {
+      sourceName = new URL(externalUrl).pathname.split("/").at(-1) || "";
+    } catch {
+      sourceName = "";
+    }
+  }
+  const decodedName = (() => {
+    try {
+      return decodeURIComponent(sourceName);
+    } catch {
+      return sourceName;
+    }
+  })();
+  const safeSourceName = decodedName.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+  if (safeSourceName && /\.[a-z0-9]{2,5}$/i.test(safeSourceName)) return safeSourceName;
+  const safeTitle = typeof record.title === "string"
+    ? record.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "")
+    : "";
+  return `${safeTitle || "occ-post-image"}.jpg`;
+}
+
 export function contentCreativeAttachment(record: ContentRecord): ContentCreativeAttachment | null {
   const path = contentCreativePath(record);
   return path ? { bucket: CONTENT_CREATIVE_BUCKET, path, attached: true } : null;

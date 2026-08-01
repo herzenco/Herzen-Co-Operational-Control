@@ -4,7 +4,8 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
-import { CONTENT_CREATIVE_BUCKET, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
+import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
+import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
 
 type View = "command" | "kanban" | "list" | "worklogs" | "content" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
@@ -60,6 +61,7 @@ type AgentForm = { code: string; name: string; role: string; lane: string; statu
 type WorkLogForm = { agent_id: string; task_id: string; entry_type: string; title: string; body: string; artifacts: string };
 type DailyUpdateForm = { agent_id: string; update_date: string; summary: string; completed: string; blockers: string; next_steps: string; asks: string; health: string };
 type LeadForm = { property_id: string; assigned_agent_id: string; contact_name: string; company: string; email: string; phone: string; source: string; subject: string; inquiry: string; status: string; priority: string; next_follow_up_at: string; notes: string };
+type ContentUtilityStatus = { contentId: string; message: string; kind: "success" | "error" };
 
 const EMPTY_FORM: TaskForm = {
   title: "",
@@ -157,11 +159,38 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ");
 }
 
+function copyTextFallback(value: string) {
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  const copied = document.execCommand("copy");
+  field.remove();
+  return copied;
+}
+
+function triggerFileDownload(url: string, filename: string, openInNewTab = false) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  if (openInNewTab) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 export function CommandCenter() {
   const supabase = useMemo(() => createClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [approvals, setApprovals] = useState<RecordValue[]>([]);
+  const [approvalActivity, setApprovalActivity] = useState<RecordValue[]>([]);
   const [updates, setUpdates] = useState<RecordValue[]>([]);
   const [workLogs, setWorkLogs] = useState<RecordValue[]>([]);
   const [contentItems, setContentItems] = useState<RecordValue[]>([]);
@@ -193,7 +222,11 @@ export function CommandCenter() {
   const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
   const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
   const [contentMediaErrors, setContentMediaErrors] = useState<Record<string, string>>({});
-  const [contentDecisionNote, setContentDecisionNote] = useState("");
+  const [contentUtilityStatus, setContentUtilityStatus] = useState<ContentUtilityStatus | null>(null);
+  const [downloadingContentId, setDownloadingContentId] = useState("");
+  const [rejectingContent, setRejectingContent] = useState<RecordValue | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [reviewSaving, setReviewSaving] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [selectedPropertyPlatform, setSelectedPropertyPlatform] = useState("");
@@ -232,7 +265,7 @@ export function CommandCenter() {
   useEffect(() => {
     const paths = contentItems
       .map((item) => {
-        return { id: String(item.id), path: contentCreativePath(item), externalUrl: contentCreativeExternalUrl(item) };
+        return { id: String(item.id), path: contentCreativePath(item), externalUrl: contentCreativeExternalUrl(item), downloadName: contentCreativeDownloadName(item) };
       })
       .filter((item) => item.path || item.externalUrl);
     if (!paths.length) {
@@ -244,11 +277,11 @@ export function CommandCenter() {
       return () => window.clearTimeout(timer);
     }
     let cancelled = false;
-    void Promise.all(paths.map(async ({ id, path, externalUrl }) => {
+    void Promise.all(paths.map(async ({ id, path, externalUrl, downloadName }) => {
       if (externalUrl) return { id, preview: externalUrl, download: externalUrl, error: "" };
       const [preview, download] = await Promise.all([
         supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600),
-        supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600, { download: `content-${id}` }),
+        supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600, { download: downloadName }),
       ]);
       return { id, preview: preview.data?.signedUrl || "", download: download.data?.signedUrl || "", error: preview.error?.message || download.error?.message || "" };
     })).then((urls) => {
@@ -306,6 +339,7 @@ export function CommandCenter() {
         channelsResponse,
         typesResponse,
         historyResponse,
+        approvalActivityResponse,
         leadsResponse,
       ] = await Promise.all([
         fetch("/api/v1/overview", { headers }),
@@ -317,6 +351,7 @@ export function CommandCenter() {
         fetch("/api/v1/content-channels?limit=100&offset=0", { headers }),
         fetch("/api/v1/content-types?limit=100&offset=0", { headers }),
         fetch("/api/v1/content-status-history?limit=500&offset=0", { headers }),
+        fetch("/api/v1/activity?entity_type=approvals&limit=500&offset=0", { headers }),
         fetch("/api/v1/leads?limit=500&offset=0", { headers }),
       ]);
       const [
@@ -329,6 +364,7 @@ export function CommandCenter() {
         channelsPayload,
         typesPayload,
         historyPayload,
+        approvalActivityPayload,
         leadsPayload,
       ] = await Promise.all([
         overviewResponse.json(),
@@ -340,6 +376,7 @@ export function CommandCenter() {
         channelsResponse.json(),
         typesResponse.json(),
         historyResponse.json(),
+        approvalActivityResponse.json(),
         leadsResponse.json(),
       ]);
       if (!overviewResponse.ok) throw new Error(overviewPayload?.error?.message || "Could not load operations.");
@@ -370,6 +407,7 @@ export function CommandCenter() {
       setContentChannels(channelsPayload.data.items);
       setContentTypes(typesPayload.data.items);
       setContentHistory(historyPayload.data.items);
+      setApprovalActivity(approvalActivityResponse.ok ? approvalActivityPayload.data.items : []);
       setLeads(leadsResponse.ok ? leadsPayload.data.items : []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load operations.");
@@ -606,6 +644,53 @@ export function CommandCenter() {
     return contentDownloadUrls[String(item.id)] || contentPictureUrl(item);
   }
 
+  async function copyContentCaption(item: RecordValue) {
+    const contentId = String(item.id);
+    const caption = text(item.caption, "").trim();
+    if (!caption) {
+      setContentUtilityStatus({ contentId, message: "No caption is available to copy.", kind: "error" });
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(caption);
+      } else if (!copyTextFallback(caption)) {
+        throw new Error("Clipboard access is unavailable.");
+      }
+      setContentUtilityStatus({ contentId, message: "Caption copied.", kind: "success" });
+    } catch {
+      setContentUtilityStatus({ contentId, message: "Could not copy the caption. Check browser clipboard access.", kind: "error" });
+    }
+  }
+
+  async function downloadContentPicture(item: RecordValue) {
+    const contentId = String(item.id);
+    const downloadUrl = contentPictureDownloadUrl(item);
+    if (!downloadUrl) {
+      setContentUtilityStatus({ contentId, message: "No downloadable image is attached.", kind: "error" });
+      return;
+    }
+    const filename = contentCreativeDownloadName(item);
+    setDownloadingContentId(contentId);
+    try {
+      if (contentCreativePath(item)) {
+        triggerFileDownload(downloadUrl, filename);
+      } else {
+        const response = await fetch(downloadUrl, { credentials: "omit" });
+        if (!response.ok) throw new Error(`Image request failed (${response.status}).`);
+        const objectUrl = URL.createObjectURL(await response.blob());
+        triggerFileDownload(objectUrl, filename);
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+      }
+      setContentUtilityStatus({ contentId, message: "Image download started.", kind: "success" });
+    } catch {
+      triggerFileDownload(downloadUrl, filename, true);
+      setContentUtilityStatus({ contentId, message: "The image opened in a new tab. Save it from there if the download did not begin.", kind: "error" });
+    } finally {
+      setDownloadingContentId("");
+    }
+  }
+
   function openContent(item?: RecordValue) {
     const nextItem = item || null;
     setSelectedContent(nextItem);
@@ -632,9 +717,13 @@ export function CommandCenter() {
 
   function previewContent(item: RecordValue) {
     setSelectedContent(item);
-    const approval = approvals.find((entry) => String(entry.id) === String(item.approval_id));
-    setContentDecisionNote(text(approval?.decision_note, ""));
     setDrawer("contentPreview");
+  }
+
+  function openContentRejection(item: RecordValue) {
+    setError("");
+    setRejectingContent(item);
+    setRejectionReason("");
   }
 
   async function ensureContentApproval(item: RecordValue) {
@@ -662,34 +751,34 @@ export function CommandCenter() {
     return approvalPayload.data as RecordValue;
   }
 
-  async function reviewContent(item: RecordValue, decision: "approved" | "changes_requested") {
-    if (decision === "changes_requested" && !contentDecisionNote.trim()) {
-      setError("Rejection feedback is required so Lupe can learn from the decision.");
+  async function reviewContent(item: RecordValue, decision: "approved" | "changes_requested", note = "") {
+    const decisionNote = note.trim();
+    if (decision === "changes_requested" && !decisionNote) {
+      setError("A rejection reason is required for Lupe and C-3PO.");
       return;
     }
     try {
       setError("");
+      setReviewSaving(true);
       const approval = await ensureContentApproval(item);
       await request(`/api/v1/approvals/${approval.id}`, {
         method: "PATCH",
         body: JSON.stringify({
           status: decision,
-          decision_note: contentDecisionNote.trim() || null,
+          decision_note: decisionNote || null,
           decided_at: new Date().toISOString(),
+          schedule_content: decision === "approved" && Boolean(item.publish_at),
         }),
       });
-      if (decision === "approved" && item.publish_at) {
-        await request(`/api/v1/content-items/${item.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ status: "scheduled" }),
-        });
-      }
       setDrawer(null);
       setSelectedContent(null);
-      setContentDecisionNote("");
+      setRejectingContent(null);
+      setRejectionReason("");
       if (session) await refreshAll(session.access_token);
     } catch (reviewError) {
       setError(reviewError instanceof Error ? reviewError.message : "Could not record the content decision.");
+    } finally {
+      setReviewSaving(false);
     }
   }
 
@@ -1038,6 +1127,23 @@ export function CommandCenter() {
     const previewItems = contentItems.filter((item) =>
       String(item.property_id) === String(selectedProperty?.id) && contentPlatformForItem(item) === activePropertyPlatform
     ).sort((left, right) => new Date(String(right.publish_at || right.created_at)).getTime() - new Date(String(left.publish_at || left.created_at)).getTime());
+    const rejectedFeedback = rejectionHistoryFromActivity(approvalActivity);
+    for (const approval of approvals) {
+      const decision = text(approval.status, "");
+      const reason = text(approval.decision_note, "").trim();
+      const contentItemId = text(approval.content_item_id, "");
+      const alreadyCaptured = rejectedFeedback.some((entry) => entry.approvalId === String(approval.id) && entry.reason === reason);
+      if (["changes_requested", "declined"].includes(decision) && reason && contentItemId && !alreadyCaptured) {
+        rejectedFeedback.push({
+          id: `current-${String(approval.id)}`,
+          approvalId: String(approval.id),
+          contentItemId,
+          decision: decision as "changes_requested" | "declined",
+          reason,
+          decidedAt: text(approval.decided_at || approval.updated_at, ""),
+        });
+      }
+    }
     const changeMonth = (amount: number) => {
       const next = new Date(monthDate.getFullYear(), monthDate.getMonth() + amount, 1);
       setCalendarMonth(next.toLocaleDateString("en-CA", { year: "numeric", month: "2-digit" }));
@@ -1106,15 +1212,21 @@ export function CommandCenter() {
             {(contentPlatform !== "all" || contentAccount !== "all" || contentType !== "all") && <button className="ghostBtn" onClick={() => { setContentPlatform("all"); setContentAccount("all"); setContentType("all"); }}>Clear filters</button>}
           </div>
           <div className="contentHead"><span>Date</span><span>Content</span><span>Platform</span><span>Account</span><span>Owner</span><span>Stage</span><span /></div>
-          <div className="contentCards">{filteredContent.map((item) => (
-            <article key={String(item.id)} onClick={() => previewContent(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") previewContent(item); }} role="button" tabIndex={0}>
+          <div className="contentCards" aria-label="Content review queue">{filteredContent.map((item) => (
+            <article key={String(item.id)} className={`${contentPlatformForItem(item).toLowerCase() === "instagram" ? "instagramReviewCard" : ""} ${isContentReviewable(item.status) ? "reviewable" : ""}`.trim()}>
               <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
-              <span className="contentTitle contentTitleButton"><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small><p className="mobileContentCaption">{text(item.caption, "No caption documented.")}</p>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</span>
+              <button type="button" className="mobilePostCreative" onClick={() => previewContent(item)} aria-label={`Open ${text(item.title)} preview`}>
+                {contentPictureUrl(item) ? <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={contentPictureUrl(item)} alt={`Creative for ${text(item.title)}`} />
+                </> : <span><b>{initials(contentPropertyName(item))}</b><small>Creative unavailable</small></span>}
+              </button>
+              <button type="button" className="contentTitle contentTitleButton" onClick={() => previewContent(item)}><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small><span className="mobileContentCaption">{text(item.caption, "No caption documented.")}</span>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</button>
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
-              <button className="ownerLink" onClick={(event) => { event.stopPropagation(); const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
+              <button className="ownerLink" onClick={() => { const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
               <span className={`statusPill s${text(item.status).replaceAll("_", "")}`}><i />{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</span>
-              <span className="contentActions" onClick={(event) => event.stopPropagation()}>
+              <span className="contentActions">
                 {["idea", "revision_requested"].includes(text(item.status)) && <button onClick={() => void advanceContent(item, "research_ready")}>Research ready</button>}
                 {text(item.status) === "research_ready" && <button onClick={() => void advanceContent(item, "drafting")}>Start draft</button>}
                 {text(item.status) === "drafting" && <button onClick={() => void advanceContent(item, "ready_for_lupe")}>Send to Lupe</button>}
@@ -1124,6 +1236,15 @@ export function CommandCenter() {
                 {["publishing", "failed"].includes(text(item.status)) && <button onClick={() => openContent(item)}>Record result</button>}
                 {text(item.status) === "published" && Boolean(item.final_url) && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
               </span>
+              {contentPlatformForItem(item).toLowerCase() === "instagram" && <div className="mobilePostTools">
+                <button className="outlineBtn" disabled={!text(item.caption, "").trim()} onClick={() => void copyContentCaption(item)}>Copy caption</button>
+                <button className="outlineBtn" disabled={!contentPictureDownloadUrl(item) || downloadingContentId === String(item.id)} onClick={() => void downloadContentPicture(item)}>{downloadingContentId === String(item.id) ? "Preparing…" : "Download image"}</button>
+                {contentUtilityStatus?.contentId === String(item.id) && <span className={`contentUtilityStatus ${contentUtilityStatus.kind}`} role="status" aria-live="polite">{contentUtilityStatus.message}</span>}
+              </div>}
+              {contentPlatformForItem(item).toLowerCase() === "instagram" && isContentReviewable(item.status) && <div className="mobileReviewActions">
+                <button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(item)}>Reject</button>
+                <button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(item, "approved")}>Approve</button>
+              </div>}
             </article>
           ))}
           {!filteredContent.length && <div className="opsEmpty">{contentItems.length ? "No content matches the selected filters." : "No content records yet. Create the first item and move it through research, production, Tito approval, and publishing."}</div>}
@@ -1132,11 +1253,12 @@ export function CommandCenter() {
 
         <section className="deckPanel rejectedContent">
           <header className="panelHead"><div><span>Rejected</span><h2>Feedback Lupe must carry forward</h2></div><small>Permanent decision history</small></header>
-          {approvals.filter((approval) => ["changes_requested", "declined"].includes(text(approval.status))).map((approval) => {
-            const item = contentItems.find((entry) => String(entry.id) === String(approval.content_item_id));
-            return <button key={String(approval.id)} className="rejectedContentRow" onClick={() => item && previewContent(item)}><span><b>{text(item?.title, text(approval.title))}</b><small>{item ? contentPropertyName(item) : "Content"} · {dateLabel(approval.decided_at)}</small></span><p>{text(approval.decision_note, "No written feedback was captured.")}</p></button>;
+          {rejectedFeedback.map((feedback) => {
+            const item = contentItems.find((entry) => String(entry.id) === feedback.contentItemId);
+            const owner = item ? agentMap.get(String(item.owner_agent_id)) : "Content owner";
+            return <button key={feedback.id} className="rejectedContentRow" onClick={() => item && previewContent(item)}><span><b>{text(item?.title, "Archived content decision")}</b><small>{item ? contentPropertyName(item) : "Content"} · {dateLabel(feedback.decidedAt)} · For Lupe + {owner || "content owner"}</small></span><p>{feedback.reason}</p></button>;
           })}
-          {!approvals.some((approval) => ["changes_requested", "declined"].includes(text(approval.status))) && <p className="opsEmpty">No rejected posts. Feedback will remain here for Lupe after a post is returned.</p>}
+          {!rejectedFeedback.length && <p className="opsEmpty">No rejected posts. Feedback will remain here for Lupe and the content owner after a post is returned.</p>}
         </section>
       </div>
     );
@@ -1289,22 +1411,31 @@ export function CommandCenter() {
                 <div className="contentPreviewMeta">
                   <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
                 </div>
-                {contentPictureUrl(selectedContent) ? (
-                  <figure className="contentCreative">
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img src={contentPictureUrl(selectedContent)} alt={`Creative for ${text(selectedContent.title)}`} />
-                    <figcaption>Original stored creative · secure preview</figcaption>
-                  </figure>
-                ) : (
-                  <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>{contentCreativePath(selectedContent) ? "Creative file unavailable" : "No creative attached yet"}</b><small>{contentCreativePath(selectedContent) ? `The record is attached to ${contentCreativePath(selectedContent)}, but Storage could not resolve it${contentMediaErrors[String(selectedContent.id)] ? `: ${contentMediaErrors[String(selectedContent.id)]}` : "."}` : "Add the final image in Edit content so it can be previewed and downloaded here."}</small></div>
-                )}
-                <section className="previewCopy"><span>Caption</span><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
+                <article className={`contentPostMockup ${contentPlatformForItem(selectedContent).toLowerCase()}`}>
+                  <header><span className="feedAvatar">{initials(contentPropertyName(selectedContent))}</span><div><b>{contentPropertyName(selectedContent)}</b><small>{contentAccountName(selectedContent)}</small></div><span>•••</span></header>
+                  {contentPictureUrl(selectedContent) ? (
+                    <figure className="contentCreative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={contentPictureUrl(selectedContent)} alt={`Creative for ${text(selectedContent.title)}`} />
+                      <figcaption>Original stored creative · secure preview</figcaption>
+                    </figure>
+                  ) : (
+                    <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>{contentCreativePath(selectedContent) ? "Creative file unavailable" : "No creative attached yet"}</b><small>{contentCreativePath(selectedContent) ? `The record is attached to ${contentCreativePath(selectedContent)}, but Storage could not resolve it${contentMediaErrors[String(selectedContent.id)] ? `: ${contentMediaErrors[String(selectedContent.id)]}` : "."}` : "Add the final image in Edit content so it can be previewed and downloaded here."}</small></div>
+                  )}
+                  <div className="contentPostSignals" aria-hidden="true"><span>♡</span><span>○</span><span>⌁</span><span>▱</span></div>
+                  <section className="contentPostCaption"><b>{contentAccountName(selectedContent)}</b><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
+                  {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && <div className="contentPostUtilityActions">
+                    <button className="outlineBtn" disabled={!text(selectedContent.caption, "").trim()} onClick={() => void copyContentCaption(selectedContent)}>Copy caption</button>
+                    <button className="liveBtn" disabled={!contentPictureDownloadUrl(selectedContent) || downloadingContentId === String(selectedContent.id)} onClick={() => void downloadContentPicture(selectedContent)}>{downloadingContentId === String(selectedContent.id) ? "Preparing download…" : "Download image"}</button>
+                    {contentUtilityStatus?.contentId === String(selectedContent.id) && <span className={`contentUtilityStatus ${contentUtilityStatus.kind}`} role="status" aria-live="polite">{contentUtilityStatus.message}</span>}
+                  </div>}
+                </article>
                 {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
                 {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
-                {!['approved', 'scheduled', 'publishing', 'published', 'cancelled'].includes(text(selectedContent.status)) && <section className="contentReviewDecision">
+                {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && isContentReviewable(selectedContent.status) && <section className="contentReviewDecision">
                   <span>Review decision</span>
-                  <label>Feedback for Lupe<textarea value={contentDecisionNote} onChange={(event) => setContentDecisionNote(event.target.value)} placeholder="Required when rejecting. Be specific about what should change and what Lupe should remember." /></label>
-                  <div><button className="liveBtn" onClick={() => void reviewContent(selectedContent, "approved")}>{selectedContent.publish_at ? "Approve & schedule" : "Approve post"}</button><button className="outlineBtn" onClick={() => void reviewContent(selectedContent, "changes_requested")}>Reject with feedback</button></div>
+                  <p>Approve this post for its documented date, or reject it and leave specific feedback for Lupe and {agentMap.get(String(selectedContent.owner_agent_id)) || "the content owner"}.</p>
+                  <div><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Reject</button><button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(selectedContent, "approved")}>{selectedContent.publish_at ? "Approve & schedule" : "Approve post"}</button></div>
                   {!selectedContent.publish_at && <small>Add a publish date before approval to place this post directly on the calendar.</small>}
                 </section>}
                 <dl className="contentPreviewFacts">
@@ -1316,7 +1447,6 @@ export function CommandCenter() {
                   <div><dt>Publication proof</dt><dd>{selectedContent.screenshot_path ? "Screenshot stored separately" : "Not recorded"}</dd></div>
                 </dl>
                 <div className="previewActions">
-                  {contentPictureDownloadUrl(selectedContent) && <a className="liveBtn" href={contentPictureDownloadUrl(selectedContent)}>Download original image</a>}
                   {Boolean(selectedContent.final_url) && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
                   <button className="outlineBtn" onClick={() => openContent(selectedContent)}>Edit content</button>
                 </div>
@@ -1465,6 +1595,26 @@ export function CommandCenter() {
               </div>
             )}
           </aside>
+        </div>
+      )}
+      {rejectingContent && (
+        <div className="contentRejectionShade" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !reviewSaving) {
+            setRejectingContent(null);
+            setRejectionReason("");
+            setError("");
+          }
+        }}>
+          <section className="contentRejectionDialog" role="dialog" aria-modal="true" aria-labelledby="content-rejection-title" aria-describedby="content-rejection-help">
+            <form onSubmit={(event) => { event.preventDefault(); void reviewContent(rejectingContent, "changes_requested", rejectionReason); }}>
+              <span className="liveLabel"><i />Return for revision</span>
+              <h2 id="content-rejection-title">Why are you rejecting this post?</h2>
+              <p id="content-rejection-help">Be specific. This feedback becomes permanent review history for Lupe and {agentMap.get(String(rejectingContent.owner_agent_id)) || "the content owner"}, so they can revise the post without repeating the mistake.</p>
+              <label>Rejection reason<textarea autoFocus required value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="What needs to change, and what should the agents remember next time?" /></label>
+              {error && <p className="contentRejectionError" role="alert">{error}</p>}
+              <footer><button type="button" className="ghostBtn" disabled={reviewSaving} onClick={() => { setRejectingContent(null); setRejectionReason(""); setError(""); }}>Cancel</button><button type="submit" className="liveBtn" disabled={reviewSaving || !rejectionReason.trim()}>{reviewSaving ? "Saving…" : "Reject post"}</button></footer>
+            </form>
+          </section>
         </div>
       )}
     </div>
