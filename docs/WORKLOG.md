@@ -74,3 +74,13 @@ This file tracks meaningful work performed in the Operational Command Center rep
   legacy Content Engine bridge is documented as optional reconciliation only.
 - Added `SUPABASE_SERVICE_ROLE_KEY` to `.env.example` because the helper
   scripts require it but the example config did not include it.
+
+### Bubbles n Salt creative attachment repair
+
+- Traced content creative upload, API persistence, fetch, signed-URL resolution, preview, and download behavior.
+- Confirmed the August seed stored `seeded/bubbles-n-salt/2026-08/day-*.webp` database paths without corresponding Storage objects.
+- Added one canonical attachment contract shared by API serialization and the content UI.
+- Added an explicit unavailable-file preview state so a stored path is no longer presented as if no attachment were assigned.
+- Added a dry-run-by-default bulk backfill for the 31 August manifest images using deterministic authenticated-user Storage paths.
+- Added save → fetch → preview contract coverage and manifest completeness coverage.
+- Documented the stable API response shape and the August repair procedure.

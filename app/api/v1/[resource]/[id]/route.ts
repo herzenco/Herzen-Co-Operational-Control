@@ -1,6 +1,7 @@
 import { isApiError, requireMember } from "../../../../../utils/api/auth";
 import { getResource, pickFields } from "../../../../../utils/api/resources";
 import { fail, ok, preflight, readJson } from "../../../../../utils/api/responses";
+import { serializeApiResource } from "../../../../../utils/content-assets";
 
 type RouteContext = { params: Promise<{ resource: string; id: string }> };
 
@@ -17,7 +18,7 @@ export async function GET(request: Request, { params }: RouteContext) {
     .eq("id", id)
     .single();
   if (error || !data) return fail(404, "not_found", "The requested record was not found.");
-  return ok(data);
+  return ok(serializeApiResource(resourceName, data));
 }
 
 export async function PATCH(request: Request, { params }: RouteContext) {
@@ -84,7 +85,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     }
   }
 
-  return ok(data);
+  return ok(serializeApiResource(resourceName, data));
 }
 
 export async function DELETE(request: Request, { params }: RouteContext) {

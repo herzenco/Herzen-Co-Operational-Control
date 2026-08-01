@@ -8,7 +8,19 @@ The Operations Command Center hosts pre-publication post images in a private Sup
 - `creative_asset_path`: the private object path of the uploaded post image in `content-creative-assets`.
 - `screenshot_path`: publication-proof screenshot in `content-publication-evidence`; it is not a post image.
 
-The `/api/v1/content-items` collection and item endpoints accept `caption` and `creative_asset_path` on create and update.
+The `/api/v1/content-items` collection and item endpoints accept `caption` and `creative_asset_path` on create and update. Every content-item response also includes the stable, derived attachment shape:
+
+```json
+{
+  "creative_attachment": {
+    "bucket": "content-creative-assets",
+    "path": "<private object path>",
+    "attached": true
+  }
+}
+```
+
+`creative_attachment` is `null` when no asset path is stored. It contains no public or permanent URL; authenticated clients create short-lived signed preview/download URLs from its bucket and path.
 
 ## Upload and access model
 
@@ -29,7 +41,18 @@ When a content record has:
 
 both `caption` and `creative_asset_path` are required. The content form checks this before uploading or saving, and the `private.validate_bubbles_c3po_content()` database trigger enforces the same rule for every API or database write.
 
-This rule applies to new records and edits. No legacy content is imported or backfilled.
+This rule applies to new records and edits. A database path is only an attachment when an object exists at that exact path in the private bucket.
+
+## August 2026 seeded-path repair
+
+The original Bubbles n Salt August seed stored placeholder paths under `seeded/bubbles-n-salt/2026-08/` without uploading objects. Run the repeatable repair from the repo root:
+
+```bash
+node --env-file=.env.local scripts/backfill-bubbles-creatives.mjs
+node --env-file=.env.local scripts/backfill-bubbles-creatives.mjs --apply
+```
+
+The first command is a dry run. `--apply` uploads all 31 manifest-selected originals to authenticated-user paths and updates the matching August records. It is safe to rerun because uploads use deterministic date-based names with upsert. Override `BUBBLES_MANIFEST_PATH` or `BUBBLES_AGENT_ROOT` when the operating-agent files live elsewhere. The script accepts either `OCC_INTEGRATION_EMAIL` / `OCC_INTEGRATION_PASSWORD` or the existing `LUPE_API_EMAIL` / `LUPE_API_PASSWORD` variables.
 
 ## Operator workflow
 

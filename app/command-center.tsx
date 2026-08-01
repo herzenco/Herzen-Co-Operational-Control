@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
+import { CONTENT_CREATIVE_BUCKET, contentCreativePath } from "../utils/content-assets";
 
 type View = "command" | "kanban" | "list" | "worklogs" | "content" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
@@ -191,6 +192,7 @@ export function CommandCenter() {
   const [creativeFile, setCreativeFile] = useState<File | null>(null);
   const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
   const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
+  const [contentMediaErrors, setContentMediaErrors] = useState<Record<string, string>>({});
   const [calendarMonth, setCalendarMonth] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [selectedPropertyPlatform, setSelectedPropertyPlatform] = useState("");
@@ -229,27 +231,29 @@ export function CommandCenter() {
   useEffect(() => {
     const paths = contentItems
       .map((item) => {
-        return { id: String(item.id), path: text(item.creative_asset_path, "") };
+        return { id: String(item.id), path: contentCreativePath(item) };
       })
       .filter((item) => item.path);
     if (!paths.length) {
       const timer = window.setTimeout(() => {
         setContentMediaUrls({});
         setContentDownloadUrls({});
+        setContentMediaErrors({});
       }, 0);
       return () => window.clearTimeout(timer);
     }
     let cancelled = false;
     void Promise.all(paths.map(async ({ id, path }) => {
       const [preview, download] = await Promise.all([
-        supabase.storage.from("content-creative-assets").createSignedUrl(path, 3600),
-        supabase.storage.from("content-creative-assets").createSignedUrl(path, 3600, { download: `content-${id}` }),
+        supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600),
+        supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600, { download: `content-${id}` }),
       ]);
-      return { id, preview: preview.data?.signedUrl || "", download: download.data?.signedUrl || "" };
+      return { id, preview: preview.data?.signedUrl || "", download: download.data?.signedUrl || "", error: preview.error?.message || download.error?.message || "" };
     })).then((urls) => {
       if (cancelled) return;
       setContentMediaUrls(Object.fromEntries(urls.map(({ id, preview }) => [id, preview])));
       setContentDownloadUrls(Object.fromEntries(urls.map(({ id, download }) => [id, download])));
+      setContentMediaErrors(Object.fromEntries(urls.filter(({ error }) => error).map(({ id, error }) => [id, error])));
     });
     return () => { cancelled = true; };
   }, [contentItems, supabase]);
@@ -610,7 +614,7 @@ export function CommandCenter() {
       brief: text(nextItem.brief, ""),
       body: text(nextItem.body, ""),
       caption: text(nextItem.caption, ""),
-      creative_asset_path: text(nextItem.creative_asset_path, ""),
+      creative_asset_path: contentCreativePath(nextItem),
       property_id: text(nextItem.property_id, ""),
       channel_id: text(nextItem.channel_id, ""),
       content_type_id: text(nextItem.content_type_id, ""),
@@ -661,7 +665,7 @@ export function CommandCenter() {
         const extension = creativeFile.name.split(".").pop()?.toLowerCase() || "png";
         const objectPath = `${session.user.id}/${selectedContent?.id || crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`;
         const { error: creativeUploadError } = await supabase.storage
-          .from("content-creative-assets")
+          .from(CONTENT_CREATIVE_BUCKET)
           .upload(objectPath, creativeFile, {
             cacheControl: "3600",
             contentType: creativeFile.type,
@@ -1222,7 +1226,7 @@ export function CommandCenter() {
                     <figcaption>Original stored creative · secure preview</figcaption>
                   </figure>
                 ) : (
-                  <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>No creative attached yet</b><small>Add the final image in Edit content so it can be previewed and downloaded here.</small></div>
+                  <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>{contentCreativePath(selectedContent) ? "Creative file unavailable" : "No creative attached yet"}</b><small>{contentCreativePath(selectedContent) ? `The record is attached to ${contentCreativePath(selectedContent)}, but Storage could not resolve it${contentMediaErrors[String(selectedContent.id)] ? `: ${contentMediaErrors[String(selectedContent.id)]}` : "."}` : "Add the final image in Edit content so it can be previewed and downloaded here."}</small></div>
                 )}
                 <section className="previewCopy"><span>Caption</span><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
                 {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
@@ -1232,7 +1236,7 @@ export function CommandCenter() {
                   <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
                   <div><dt>Owner</dt><dd>{agentMap.get(String(selectedContent.owner_agent_id)) || "Unassigned"}</dd></div>
                   <div><dt>Distribution</dt><dd>{text(selectedContent.distribution_mode)}</dd></div>
-                  <div><dt>Post image asset</dt><dd>{text(selectedContent.creative_asset_path, "Not uploaded")}</dd></div>
+                  <div><dt>Post image asset</dt><dd>{contentCreativePath(selectedContent) || "Not uploaded"}</dd></div>
                   <div><dt>Publication proof</dt><dd>{selectedContent.screenshot_path ? "Screenshot stored separately" : "Not recorded"}</dd></div>
                 </dl>
                 <div className="previewActions">

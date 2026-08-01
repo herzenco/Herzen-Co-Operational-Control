@@ -199,6 +199,8 @@ failed
 cancelled
 ```
 
+Creative fields are `caption` and `creative_asset_path`. The latter is a private object path in `content-creative-assets`, never a pasted public URL. Reads and successful writes return a derived `creative_attachment` object with `bucket`, `path`, and `attached: true`, or `null` when absent. Clients use that stable shape to request a temporary signed preview or download URL. Publication proof remains separate in `screenshot_path` and `content-publication-evidence`.
+
 ### Create a content item
 
 ```http
@@ -209,6 +211,8 @@ Content-Type: application/json
 {
   "title": "Founder operating note",
   "brief": "Turn K2's research into a concise LinkedIn post.",
+  "caption": "The final publishing caption.",
+  "creative_asset_path": "<user uuid>/content-record/image.jpg",
   "property_id": "<Herzen Co. property uuid>",
   "channel_id": "<Herzen Co. LinkedIn channel uuid>",
   "owner_agent_id": "<C-3PO uuid>",

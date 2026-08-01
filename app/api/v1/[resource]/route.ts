@@ -1,6 +1,7 @@
 import { isApiError, requireMember } from "../../../../utils/api/auth";
 import { getResource, pickFields } from "../../../../utils/api/resources";
 import { fail, ok, preflight, readJson } from "../../../../utils/api/responses";
+import { serializeApiResource } from "../../../../utils/content-assets";
 
 type RouteContext = { params: Promise<{ resource: string }> };
 
@@ -28,7 +29,7 @@ export async function GET(request: Request, { params }: RouteContext) {
 
   const { data, error, count } = await query;
   if (error) return fail(500, "database_error", error.message);
-  return ok({ items: data, count, limit, offset });
+  return ok({ items: serializeApiResource(resourceName, data), count, limit, offset });
 }
 
 export async function POST(request: Request, { params }: RouteContext) {
@@ -57,7 +58,7 @@ export async function POST(request: Request, { params }: RouteContext) {
     const status = error.code === "23505" ? 409 : 400;
     return fail(status, "write_failed", error.message, { postgres_code: error.code });
   }
-  return ok(data, { status: 201 });
+  return ok(serializeApiResource(resourceName, data), { status: 201 });
 }
 
 export const OPTIONS = preflight;
