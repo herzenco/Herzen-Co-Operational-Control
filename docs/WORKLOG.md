@@ -84,3 +84,24 @@ This file tracks meaningful work performed in the Operational Command Center rep
 - Added a dry-run-by-default bulk backfill for the 31 August manifest images using deterministic authenticated-user Storage paths.
 - Added save → fetch → preview contract coverage and manifest completeness coverage.
 - Documented the stable API response shape and the August repair procedure.
+
+### Content review redesign
+
+- Moved Properties and channel/feed previews to the top of Content and removed the “Publishing desk” framing.
+- Added direct post approval from the content preview; approved posts with a publish date move immediately to `scheduled` and appear on the calendar.
+- Made written feedback mandatory when rejecting a post and added a durable Rejected section sourced from approval decision notes for Lupe.
+- Added caption-first, horizontally swipeable mobile post cards using native scroll snapping.
+
+### Bubbles n Salt ownership compatibility repair
+
+- Diagnosed recreated August rows failing C-3PO assignment because the active validator reads first-class `caption` and `creative_asset_path` columns while the recreation populated the earlier `metadata.caption` and `metadata.image_url` contract.
+- Added a forward-only validator migration that accepts either canonical fields or the compatible metadata fields without weakening the property-and-owner scope.
+- Added a fail-closed August ownership backfill that proceeds only when exactly 31 target rows exist and all 31 are `ready_for_lupe` with caption and image metadata.
+- Added post-update assertions for status, metadata, and C-3PO ownership.
+
+### Local creative-path resolution
+
+- Traced dark content placeholders to recreated records storing local `Assets/...` values in `metadata.image_url`; OCC preview intentionally resolves hosted Storage paths or valid HTTP URLs only.
+- Extended the August repair to reuse/upload deterministic private Storage objects, populate canonical caption and creative path fields, preserve the original local path as provenance, and replace `metadata.image_url` with a stable `storage://` reference.
+- Added API write normalization that copies metadata captions and rejects unresolved local image paths with an actionable 422 response.
+- Preserved direct rendering for valid existing `http://` and `https://` image URLs and graceful placeholders for missing/broken values.

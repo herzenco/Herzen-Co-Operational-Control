@@ -2,6 +2,7 @@ import { isApiError, requireMember } from "../../../../utils/api/auth";
 import { getResource, pickFields } from "../../../../utils/api/resources";
 import { fail, ok, preflight, readJson } from "../../../../utils/api/responses";
 import { serializeApiResource } from "../../../../utils/content-assets";
+import { normalizeContentWrite } from "../../../../utils/content-write";
 
 type RouteContext = { params: Promise<{ resource: string }> };
 
@@ -43,10 +44,15 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   const body = await readJson(request);
   if (!body) return fail(400, "invalid_json", "Send a JSON request body.");
-  const payload = {
+  let payload: Record<string, unknown> = {
     ...pickFields(body, resource.createFields),
     created_by: context.user.id,
   };
+  if (resourceName === "content-items") {
+    const normalized = normalizeContentWrite(payload);
+    if (normalized.error) return fail(422, "unhosted_creative", normalized.error);
+    payload = normalized.payload;
+  }
 
   const { data, error } = await context.supabase
     .from(resource.table)

@@ -22,6 +22,8 @@ The `/api/v1/content-items` collection and item endpoints accept `caption` and `
 
 `creative_attachment` is `null` when no asset path is stored. It contains no public or permanent URL; authenticated clients create short-lived signed preview/download URLs from its bucket and path.
 
+Metadata may carry either a valid `https://` image URL or a stable private reference shaped as `storage://content-creative-assets/<object path>`. OCC resolves the latter through the same signed-URL flow as `creative_asset_path`. Local filesystem values such as `Assets/...` are never browser-loadable and are rejected by the content API unless the write also supplies a canonical hosted `creative_asset_path`.
+
 ## Upload and access model
 
 Creative files are JPEG, PNG, or WebP images up to 25 MB. The browser uploads with the current Supabase session to:
@@ -45,14 +47,14 @@ This rule applies to new records and edits. A database path is only an attachmen
 
 ## August 2026 seeded-path repair
 
-The original Bubbles n Salt August seed stored placeholder paths under `seeded/bubbles-n-salt/2026-08/` without uploading objects. Run the repeatable repair from the repo root:
+The repeatable repair uploads the manifest originals and converts local `Assets/...` metadata to canonical private Storage attachments:
 
 ```bash
 node --env-file=.env.local scripts/backfill-bubbles-creatives.mjs
 node --env-file=.env.local scripts/backfill-bubbles-creatives.mjs --apply
 ```
 
-The first command is a dry run. `--apply` uploads all 31 manifest-selected originals to authenticated-user paths and updates the matching August records. It is safe to rerun because uploads use deterministic date-based names with upsert. Override `BUBBLES_MANIFEST_PATH` or `BUBBLES_AGENT_ROOT` when the operating-agent files live elsewhere. The script accepts either `OCC_INTEGRATION_EMAIL` / `OCC_INTEGRATION_PASSWORD` or the existing `LUPE_API_EMAIL` / `LUPE_API_PASSWORD` variables.
+The first command is a dry run. `--apply` uploads missing manifest-selected originals to deterministic authenticated-user paths; existing Storage objects are reused without replacement. It copies captions into the first-class field, stores `creative_asset_path`, changes `metadata.image_url` to a `storage://` hosted reference, preserves the former local value as `metadata.source_image_path`, and assigns C-3PO/K2. Override `BUBBLES_MANIFEST_PATH` or `BUBBLES_AGENT_ROOT` when the operating-agent files live elsewhere. The script accepts either `OCC_INTEGRATION_EMAIL` / `OCC_INTEGRATION_PASSWORD` or the existing `LUPE_API_EMAIL` / `LUPE_API_PASSWORD` variables.
 
 ## Operator workflow
 
@@ -63,3 +65,9 @@ The first command is a dry run. `--apply` uploads all 31 manifest-selected origi
 5. Save. OCC uploads the creative first, then stores its private path on the content record.
 6. Open the record to preview or download the original creative.
 7. After publishing, attach the separate Publication screenshot as proof.
+
+## Tito review in Content
+
+Opening a post exposes the final caption, creative, and a direct review decision. **Approve & schedule** records the approval and, when `publish_at` exists, immediately moves the item to `scheduled` so it appears on the publishing calendar. **Reject with feedback** requires a written decision note, moves the item to `revision_requested`, and retains the note in the Content page's Rejected section for Lupe.
+
+The Rejected section is institutional memory, not a transient notification. Lupe should consult prior feedback when revising a post and before assembling later approval packages. Mobile Content presents posts as horizontally swipeable, caption-first cards; opening a card provides the same approval controls as desktop.

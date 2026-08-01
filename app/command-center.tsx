@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
-import { CONTENT_CREATIVE_BUCKET, contentCreativePath } from "../utils/content-assets";
+import { CONTENT_CREATIVE_BUCKET, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
 
 type View = "command" | "kanban" | "list" | "worklogs" | "content" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
@@ -193,6 +193,7 @@ export function CommandCenter() {
   const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
   const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
   const [contentMediaErrors, setContentMediaErrors] = useState<Record<string, string>>({});
+  const [contentDecisionNote, setContentDecisionNote] = useState("");
   const [calendarMonth, setCalendarMonth] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [selectedPropertyPlatform, setSelectedPropertyPlatform] = useState("");
@@ -231,9 +232,9 @@ export function CommandCenter() {
   useEffect(() => {
     const paths = contentItems
       .map((item) => {
-        return { id: String(item.id), path: contentCreativePath(item) };
+        return { id: String(item.id), path: contentCreativePath(item), externalUrl: contentCreativeExternalUrl(item) };
       })
-      .filter((item) => item.path);
+      .filter((item) => item.path || item.externalUrl);
     if (!paths.length) {
       const timer = window.setTimeout(() => {
         setContentMediaUrls({});
@@ -243,7 +244,8 @@ export function CommandCenter() {
       return () => window.clearTimeout(timer);
     }
     let cancelled = false;
-    void Promise.all(paths.map(async ({ id, path }) => {
+    void Promise.all(paths.map(async ({ id, path, externalUrl }) => {
+      if (externalUrl) return { id, preview: externalUrl, download: externalUrl, error: "" };
       const [preview, download] = await Promise.all([
         supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600),
         supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600, { download: `content-${id}` }),
@@ -630,7 +632,65 @@ export function CommandCenter() {
 
   function previewContent(item: RecordValue) {
     setSelectedContent(item);
+    const approval = approvals.find((entry) => String(entry.id) === String(item.approval_id));
+    setContentDecisionNote(text(approval?.decision_note, ""));
     setDrawer("contentPreview");
+  }
+
+  async function ensureContentApproval(item: RecordValue) {
+    const existing = approvals.find((approval) => String(approval.id) === String(item.approval_id));
+    if (existing) return existing;
+    if (!lupe) throw new Error("Lupe must exist in the agent roster before content can be reviewed.");
+    const approvalPayload = await request("/api/v1/approvals", {
+      method: "POST",
+      body: JSON.stringify({
+        content_item_id: item.id,
+        requested_by_agent_id: lupe.id,
+        reviewer_agent_id: lupe.id,
+        title: `Content approval: ${text(item.title)}`,
+        summary: text(item.brief || item.body || item.caption, "Content submitted for review."),
+        evidence: [`Property: ${contentPropertyName(item)}`, `Channel: ${contentAccountName(item)}`, `Format: ${contentTypeName(item)}`],
+        recommendation: "Approve for the documented publish date or return specific feedback to Lupe.",
+        status: "pending",
+        due_at: item.publish_at || null,
+      }),
+    });
+    await request(`/api/v1/content-items/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ approval_id: approvalPayload.data.id, status: "awaiting_tito" }),
+    });
+    return approvalPayload.data as RecordValue;
+  }
+
+  async function reviewContent(item: RecordValue, decision: "approved" | "changes_requested") {
+    if (decision === "changes_requested" && !contentDecisionNote.trim()) {
+      setError("Rejection feedback is required so Lupe can learn from the decision.");
+      return;
+    }
+    try {
+      setError("");
+      const approval = await ensureContentApproval(item);
+      await request(`/api/v1/approvals/${approval.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: decision,
+          decision_note: contentDecisionNote.trim() || null,
+          decided_at: new Date().toISOString(),
+        }),
+      });
+      if (decision === "approved" && item.publish_at) {
+        await request(`/api/v1/content-items/${item.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "scheduled" }),
+        });
+      }
+      setDrawer(null);
+      setSelectedContent(null);
+      setContentDecisionNote("");
+      if (session) await refreshAll(session.access_token);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Could not record the content decision.");
+    }
   }
 
   function channelsForProperty(propertyId: string) {
@@ -984,6 +1044,29 @@ export function CommandCenter() {
     };
     return (
       <div className="contentWorkspace">
+        <section className="deckPanel propertyPanel">
+          <header className="panelHead"><div><span>Properties</span><h2>Channel preview</h2></div><small>See the feed before it publishes</small></header>
+          <div className="propertyTabs" role="tablist" aria-label="Publishing properties">
+            {contentProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
+          </div>
+          {selectedProperty && <div className="propertyPreview">
+            <div className="platformTabs" role="tablist" aria-label={`${text(selectedProperty.name)} platforms`}>
+              {propertyPlatforms.map((platform) => <button key={platform} role="tab" aria-selected={platform === activePropertyPlatform} className={platform === activePropertyPlatform ? "active" : ""} onClick={() => setSelectedPropertyPlatform(platform)}>{platform}</button>)}
+            </div>
+            <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
+            <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
+              {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
+                {contentPictureUrl(item) ? <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={contentPictureUrl(item)} alt={`Preview for ${text(item.title)}`} />
+                </> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
+                <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
+              </button>)}
+              {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
+            </div>
+          </div>}
+        </section>
+
         <section className="metricDeck contentMetrics">
           <div><span>Scheduled</span><strong>{String(scheduled.length).padStart(2, "0")}</strong><small>Approved content moving toward publication</small></div>
           <div><span>With Tito</span><strong>{String(inReview.length).padStart(2, "0")}</strong><small>Lupe-managed review and revision packages</small></div>
@@ -1015,7 +1098,7 @@ export function CommandCenter() {
         </section>
 
         <section className="deckPanel contentSchedule">
-          <header className="panelHead"><div><span>Publishing desk</span><h2>Content records</h2></div><small>Click any item to open its preview</small></header>
+          <header className="panelHead"><div><span>Posts</span><h2>Review every caption and creative</h2></div><small>Open a post to approve it or return feedback</small></header>
           <div className="contentFilters">
             <label>Platform<select value={contentPlatform} onChange={(event) => setContentPlatform(event.target.value)}><option value="all">All platforms</option>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select></label>
             <label>Account<select value={contentAccount} onChange={(event) => setContentAccount(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select></label>
@@ -1023,10 +1106,10 @@ export function CommandCenter() {
             {(contentPlatform !== "all" || contentAccount !== "all" || contentType !== "all") && <button className="ghostBtn" onClick={() => { setContentPlatform("all"); setContentAccount("all"); setContentType("all"); }}>Clear filters</button>}
           </div>
           <div className="contentHead"><span>Date</span><span>Content</span><span>Platform</span><span>Account</span><span>Owner</span><span>Stage</span><span /></div>
-          {filteredContent.map((item) => (
+          <div className="contentCards">{filteredContent.map((item) => (
             <article key={String(item.id)} onClick={() => previewContent(item)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") previewContent(item); }} role="button" tabIndex={0}>
               <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
-              <span className="contentTitle contentTitleButton"><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</span>
+              <span className="contentTitle contentTitleButton"><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small><p className="mobileContentCaption">{text(item.caption, "No caption documented.")}</p>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</span>
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
               <button className="ownerLink" onClick={(event) => { event.stopPropagation(); const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
@@ -1044,29 +1127,16 @@ export function CommandCenter() {
             </article>
           ))}
           {!filteredContent.length && <div className="opsEmpty">{contentItems.length ? "No content matches the selected filters." : "No content records yet. Create the first item and move it through research, production, Tito approval, and publishing."}</div>}
+          </div>
         </section>
 
-        <section className="deckPanel propertyPanel">
-          <header className="panelHead"><div><span>Properties</span><h2>Channel preview</h2></div><small>See the feed before it publishes</small></header>
-          <div className="propertyTabs" role="tablist" aria-label="Publishing properties">
-            {contentProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
-          </div>
-          {selectedProperty && <div className="propertyPreview">
-            <div className="platformTabs" role="tablist" aria-label={`${text(selectedProperty.name)} platforms`}>
-              {propertyPlatforms.map((platform) => <button key={platform} role="tab" aria-selected={platform === activePropertyPlatform} className={platform === activePropertyPlatform ? "active" : ""} onClick={() => setSelectedPropertyPlatform(platform)}>{platform}</button>)}
-            </div>
-            <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
-            <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
-              {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
-                {contentPictureUrl(item) ? <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={contentPictureUrl(item)} alt={`Preview for ${text(item.title)}`} />
-                </> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
-                <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
-              </button>)}
-              {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
-            </div>
-          </div>}
+        <section className="deckPanel rejectedContent">
+          <header className="panelHead"><div><span>Rejected</span><h2>Feedback Lupe must carry forward</h2></div><small>Permanent decision history</small></header>
+          {approvals.filter((approval) => ["changes_requested", "declined"].includes(text(approval.status))).map((approval) => {
+            const item = contentItems.find((entry) => String(entry.id) === String(approval.content_item_id));
+            return <button key={String(approval.id)} className="rejectedContentRow" onClick={() => item && previewContent(item)}><span><b>{text(item?.title, text(approval.title))}</b><small>{item ? contentPropertyName(item) : "Content"} · {dateLabel(approval.decided_at)}</small></span><p>{text(approval.decision_note, "No written feedback was captured.")}</p></button>;
+          })}
+          {!approvals.some((approval) => ["changes_requested", "declined"].includes(text(approval.status))) && <p className="opsEmpty">No rejected posts. Feedback will remain here for Lupe after a post is returned.</p>}
         </section>
       </div>
     );
@@ -1231,6 +1301,12 @@ export function CommandCenter() {
                 <section className="previewCopy"><span>Caption</span><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
                 {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
                 {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
+                {!['approved', 'scheduled', 'publishing', 'published', 'cancelled'].includes(text(selectedContent.status)) && <section className="contentReviewDecision">
+                  <span>Review decision</span>
+                  <label>Feedback for Lupe<textarea value={contentDecisionNote} onChange={(event) => setContentDecisionNote(event.target.value)} placeholder="Required when rejecting. Be specific about what should change and what Lupe should remember." /></label>
+                  <div><button className="liveBtn" onClick={() => void reviewContent(selectedContent, "approved")}>{selectedContent.publish_at ? "Approve & schedule" : "Approve post"}</button><button className="outlineBtn" onClick={() => void reviewContent(selectedContent, "changes_requested")}>Reject with feedback</button></div>
+                  {!selectedContent.publish_at && <small>Add a publish date before approval to place this post directly on the calendar.</small>}
+                </section>}
                 <dl className="contentPreviewFacts">
                   <div><dt>Publishes</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Not scheduled"}</dd></div>
                   <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>

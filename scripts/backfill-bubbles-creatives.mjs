@@ -29,6 +29,7 @@ function easternDate(value) {
 
 async function main() {
   const apply = process.argv.includes("--apply");
+  const quiet = process.argv.includes("--quiet");
   const manifestPath = process.env.BUBBLES_MANIFEST_PATH || DEFAULT_MANIFEST;
   const agentRoot = process.env.BUBBLES_AGENT_ROOT || DEFAULT_AGENT_ROOT;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -51,14 +52,19 @@ async function main() {
   if (agentError || !agent) throw agentError || new Error("C-3PO agent not found.");
   const { data: records, error: recordsError } = await supabase
     .from("content_items")
-    .select("id,title,publish_at,creative_asset_path")
+    .select("id,title,publish_at,caption,creative_asset_path,metadata,owner_agent_id")
     .eq("property_id", property.id)
-    .eq("owner_agent_id", agent.id)
+    .eq("channel_id", "5ec5b70d-1aa7-45f5-adde-1189c95d38ca")
     .gte("publish_at", "2026-08-01T00:00:00-04:00")
     .lt("publish_at", "2026-09-01T00:00:00-04:00");
   if (recordsError) throw recordsError;
 
   const byDate = new Map((records || []).map((record) => [easternDate(record.publish_at), record]));
+  const storageFolder = `${auth.user.id}/bubbles-n-salt/2026-08`;
+  const { data: existingObjects, error: existingObjectsError } = await supabase.storage
+    .from("content-creative-assets").list(storageFolder, { limit: 100 });
+  if (existingObjectsError) throw new Error(`Could not inspect creative storage: ${existingObjectsError.message}`);
+  const existingNames = new Set((existingObjects || []).map((object) => object.name));
   let changed = 0;
   let matched = 0;
   const written = [];
@@ -71,17 +77,40 @@ async function main() {
     const extension = extname(sourcePath).toLowerCase();
     const day = post.date.slice(-2);
     const objectPath = `${auth.user.id}/bubbles-n-salt/2026-08/day-${day}${extension}`;
-    console.log(`${apply ? "APPLY" : "PLAN "} ${post.date}: ${sourcePath} -> ${objectPath}`);
+    if (!quiet) {
+      console.log(`${apply ? "APPLY" : "PLAN "} ${post.date}: ${sourcePath} -> ${objectPath}`);
+    }
     if (!apply) continue;
-    if (record.creative_asset_path !== objectPath) {
-      const bytes = await readFile(sourcePath);
-      const { error: uploadError } = await supabase.storage
-        .from("content-creative-assets")
-        .upload(objectPath, bytes, { contentType: contentType(extension), cacheControl: "31536000", upsert: true });
-      if (uploadError) throw new Error(`${post.date} upload failed: ${uploadError.message}`);
+    const currentMetadata = record.metadata && typeof record.metadata === "object" && !Array.isArray(record.metadata) ? record.metadata : {};
+    const hostedImageReference = `storage://content-creative-assets/${objectPath}`;
+    const metadata = {
+      ...currentMetadata,
+      ...(typeof currentMetadata.image_url === "string" && currentMetadata.image_url.startsWith("Assets/") ? { source_image_path: currentMetadata.image_url } : {}),
+      image_url: hostedImageReference,
+    };
+    const caption = String(record.caption || currentMetadata.caption || "").trim();
+    const needsUpdate = record.creative_asset_path !== objectPath
+      || record.caption !== caption
+      || currentMetadata.image_url !== hostedImageReference
+      || record.owner_agent_id !== agent.id;
+    if (needsUpdate) {
+      if (!existingNames.has(objectPath.split("/").at(-1))) {
+        const bytes = await readFile(sourcePath);
+        const { error: uploadError } = await supabase.storage
+          .from("content-creative-assets")
+          .upload(objectPath, bytes, { contentType: contentType(extension), cacheControl: "31536000", upsert: false });
+        if (uploadError) throw new Error(`${post.date} upload failed: ${uploadError.message}`);
+        existingNames.add(objectPath.split("/").at(-1));
+      }
       const { error: updateError } = await supabase
         .from("content_items")
-        .update({ creative_asset_path: objectPath })
+        .update({
+          caption,
+          creative_asset_path: objectPath,
+          metadata,
+          owner_agent_id: agent.id,
+          research_owner_agent_id: "bbb00b09-0e7e-4981-8155-ea4f39d4fa2c",
+        })
         .eq("id", record.id);
       if (updateError) throw new Error(`${post.date} record update failed: ${updateError.message}`);
       changed += 1;
@@ -96,8 +125,16 @@ async function main() {
     for (const item of written) {
       if (!storedNames.has(item.path.split("/").at(-1))) throw new Error(`${item.date} Storage object verification failed.`);
       const { data: refreshed, error: refreshError } = await supabase
-        .from("content_items").select("creative_asset_path").eq("id", item.id).single();
-      if (refreshError || refreshed?.creative_asset_path !== item.path) throw new Error(`${item.date} path verification failed.`);
+        .from("content_items").select("status,owner_agent_id,research_owner_agent_id,caption,creative_asset_path,metadata").eq("id", item.id).single();
+      if (refreshError
+        || refreshed?.status !== "ready_for_lupe"
+        || refreshed?.owner_agent_id !== agent.id
+        || refreshed?.research_owner_agent_id !== "bbb00b09-0e7e-4981-8155-ea4f39d4fa2c"
+        || !String(refreshed?.caption || "").trim()
+        || refreshed?.creative_asset_path !== item.path
+        || refreshed?.metadata?.image_url !== `storage://content-creative-assets/${item.path}`) {
+        throw new Error(`${item.date} content attachment verification failed.`);
+      }
       const { data: signed, error: signedError } = await supabase.storage
         .from("content-creative-assets").createSignedUrl(item.path, 60);
       if (signedError || !signed?.signedUrl) throw new Error(`${item.date} signed preview verification failed.`);

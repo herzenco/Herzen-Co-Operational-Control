@@ -2,6 +2,7 @@ import { isApiError, requireMember } from "../../../../../utils/api/auth";
 import { getResource, pickFields } from "../../../../../utils/api/resources";
 import { fail, ok, preflight, readJson } from "../../../../../utils/api/responses";
 import { serializeApiResource } from "../../../../../utils/content-assets";
+import { normalizeContentWrite } from "../../../../../utils/content-write";
 
 type RouteContext = { params: Promise<{ resource: string; id: string }> };
 
@@ -32,7 +33,18 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   const body = await readJson(request);
   if (!body) return fail(400, "invalid_json", "Send a JSON request body.");
 
-  const payload = pickFields(body, resource.updateFields);
+  let payload = pickFields(body, resource.updateFields);
+  if (resourceName === "content-items") {
+    const { data: current, error: currentError } = await context.supabase
+      .from(resource.table)
+      .select("caption,creative_asset_path,metadata")
+      .eq("id", id)
+      .single();
+    if (currentError || !current) return fail(404, "not_found", "The requested record was not found.");
+    const normalized = normalizeContentWrite({ ...current, ...payload });
+    if (normalized.error) return fail(422, "unhosted_creative", normalized.error);
+    payload = { ...payload, caption: normalized.payload.caption };
+  }
   if (resourceName === "tasks" && body.status === "done" && !body.completed_at) {
     payload.completed_at = new Date().toISOString();
   }

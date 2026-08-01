@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { contentCreativePath, serializeApiResource } from "../utils/content-assets";
+import { contentCreativeExternalUrl, contentCreativePath, isLocalContentAsset, serializeApiResource } from "../utils/content-assets";
+import { normalizeContentWrite } from "../utils/content-write";
 import { parsePostManifest } from "../scripts/backfill-bubbles-creatives.mjs";
 
 const migration = readFileSync(
@@ -46,6 +47,22 @@ test("content API serializes a stable creative attachment for save-fetch-preview
     attached: true,
   });
   assert.equal(contentCreativePath(fetched[0]), path);
+});
+
+test("hosted metadata references resolve while local Assets paths do not", () => {
+  const path = "operator/bubbles-n-salt/2026-08/day-12.jpg";
+  assert.equal(contentCreativePath({ metadata: { image_url: `storage://content-creative-assets/${path}` } }), path);
+  assert.equal(contentCreativePath({ metadata: { image_url: "Assets/day-12.jpg" } }), "");
+  assert.equal(contentCreativeExternalUrl({ metadata: { image_url: "https://images.example.com/day-12.jpg" } }), "https://images.example.com/day-12.jpg");
+  assert.equal(isLocalContentAsset("Assets/day-12.jpg"), true);
+});
+
+test("content writes reject unresolved local files but preserve hosted URLs", () => {
+  const broken = normalizeContentWrite({ metadata: { caption: "Caption", image_url: "Assets/day-12.jpg" } });
+  assert.match(broken.error || "", /cannot be rendered/i);
+  const hosted = normalizeContentWrite({ metadata: { caption: "Caption", image_url: "https://images.example.com/day-12.jpg" } });
+  assert.equal(hosted.error, undefined);
+  assert.equal(hosted.payload.caption, "Caption");
 });
 
 test("bulk backfill parser finds every dated primary creative", () => {
