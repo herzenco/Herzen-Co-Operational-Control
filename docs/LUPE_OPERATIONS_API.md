@@ -142,6 +142,14 @@ Supported filters:
   `changed_by`
 - Activity: `actor_user_id`, `action`, `entity_type`, `entity_id`
 
+Content queues must be property-scoped for automation. Use the canonical UUID selector:
+
+```http
+GET /api/v1/content-items?property_id=<content_properties.id>&limit=100
+```
+
+For compatibility, `property=<slug>` and the legacy `brand=<slug>` resolve through `content_properties.slug` and apply the same server-side `property_id` predicate. Unknown or conflicting selectors fail closed; they never fall back to an unscoped content queue. The Bubbles workflow uses `property_id=28c377e7-0f86-4b69-909f-5b0e1f467fc2`.
+
 ## Content operating model
 
 The Operations Control Center is the intended system of record for content

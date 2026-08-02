@@ -3,6 +3,7 @@ import { getResource, pickFields } from "../../../../utils/api/resources";
 import { fail, ok, preflight, readJson } from "../../../../utils/api/responses";
 import { serializeApiResource } from "../../../../utils/content-assets";
 import { normalizeContentWrite } from "../../../../utils/content-write";
+import { resolveContentPropertyScope } from "../../../../utils/api/content-property-scope";
 
 type RouteContext = { params: Promise<{ resource: string }> };
 
@@ -23,7 +24,24 @@ export async function GET(request: Request, { params }: RouteContext) {
     .order(resource.defaultOrder, { ascending: false })
     .range(offset, offset + limit - 1);
 
+  if (resourceName === "content-items") {
+    const scope = await resolveContentPropertyScope(url.searchParams, async (slug) => {
+      const { data, error } = await context.supabase.from("content_properties").select("id").eq("slug", slug).maybeSingle();
+      if (error) throw error;
+      return data?.id ? String(data.id) : null;
+    }).catch((error: unknown) => ({
+      propertyId: null,
+      error: { code: "property_lookup_failed" as const, message: error instanceof Error ? error.message : "Could not resolve the OCC property." },
+    }));
+    if (scope.error) {
+      const status = scope.error.code === "unknown_property" ? 404 : scope.error.code === "property_lookup_failed" ? 500 : 400;
+      return fail(status, scope.error.code, scope.error.message);
+    }
+    if (scope.propertyId) query = query.eq("property_id", scope.propertyId);
+  }
+
   for (const filter of resource.filters) {
+    if (resourceName === "content-items" && filter === "property_id") continue;
     const value = url.searchParams.get(filter);
     if (value !== null) query = query.eq(filter, value);
   }
