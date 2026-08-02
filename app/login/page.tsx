@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 
 export const metadata: Metadata = {
   title: "Sign in — Herzen Co. Operations",
@@ -8,9 +9,9 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; recovered?: string }>;
 }) {
-  const { error } = await searchParams;
+  const { error, recovered } = await searchParams;
 
   return (
     <main className="companyLogin">
@@ -41,6 +42,7 @@ export default async function LoginPage({
                 : "We couldn’t verify those credentials. Try again or contact your Herzen Co. administrator."}
             </div>
           )}
+          {recovered && <div className="loginNotice" role="status">Password updated. Sign in with your new OCC credentials.</div>}
 
           <form action="/api/auth/login" method="post">
             <label>
@@ -65,6 +67,8 @@ export default async function LoginPage({
             </label>
             <button type="submit">Enter control center</button>
           </form>
+
+          <Link className="loginTextLink" href="/recover">Forgot your password?</Link>
 
           <small className="loginHelp">
             Access is limited to approved @herzenco.co accounts. There is no

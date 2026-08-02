@@ -58,3 +58,25 @@ test("keeps the company-domain boundary explicit in source", async () => {
   assert.match(loginRoute, /email\.endsWith\(`@\$\{COMPANY_EMAIL_DOMAIN\}`\)/);
   assert.match(homePage, /redirect\("\/login"\)/);
 });
+
+test("renders secure OCC recovery and password reset screens", async () => {
+  const [recoverResponse, resetResponse] = await Promise.all([render("/recover"), render("/reset-password")]);
+  assert.equal(recoverResponse.status, 200);
+  assert.equal(resetResponse.status, 200);
+  assert.match(await recoverResponse.text(), /Send recovery link/);
+  assert.match(await resetResponse.text(), /Update password/);
+});
+
+test("recovery uses Supabase PKCE callback and requires active OCC membership", async () => {
+  const [recoverRoute, callbackRoute, updateRoute] = await Promise.all([
+    readFile(new URL("../app/api/auth/recover/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/auth/callback/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/update-password/route.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(recoverRoute, /resetPasswordForEmail/);
+  assert.match(recoverRoute, /\/auth\/callback/);
+  assert.match(callbackRoute, /exchangeCodeForSession/);
+  assert.match(updateRoute, /operations_members/);
+  assert.match(updateRoute, /password\.length < 12/);
+  assert.match(updateRoute, /signOut/);
+});
