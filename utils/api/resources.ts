@@ -10,6 +10,11 @@ export type ResourceName =
   | "content-types"
   | "content-items"
   | "content-status-history"
+  | "content-assets"
+  | "agent-work-items"
+  | "agent-work-dependencies"
+  | "content-feedback"
+  | "social-operations-queue"
   | "leads"
   | "workflows"
   | "activity";
@@ -100,26 +105,60 @@ export const resources: Record<ResourceName, ResourceConfig> = {
     table: "content_items",
     mutable: true,
     createFields: [
-      "title", "brief", "body", "property_id", "channel_id", "content_type_id",
+      "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
       "owner_agent_id", "research_owner_agent_id", "task_id", "approval_id",
       "distribution_mode", "status", "approval_required",
       "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
       "external_status", "failure_message", "research_brief", "metadata",
       "legacy_content_item_id", "legacy_review_url", "source_system",
+      "hashtags", "posting_instructions", "tags", "cta", "approval_state", "feedback_version", "package_manifest", "publication_state",
+      "source_asset_id", "delivery_asset_id", "linked_research_work_item_id", "linked_creative_work_item_id",
+      "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
     ],
     updateFields: [
-      "title", "brief", "body", "property_id", "channel_id", "content_type_id",
+      "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
       "owner_agent_id", "research_owner_agent_id", "task_id", "approval_id",
       "distribution_mode", "status", "approval_required",
       "publish_at", "published_at", "final_url", "screenshot_path", "external_job_id",
       "external_status", "failure_message", "research_brief", "metadata",
       "legacy_content_item_id", "legacy_review_url", "source_system",
+      "hashtags", "posting_instructions", "tags", "cta", "approval_state", "feedback_version", "package_manifest", "publication_state",
+      "source_asset_id", "delivery_asset_id", "linked_research_work_item_id", "linked_creative_work_item_id",
+      "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
     ],
     filters: [
       "property_id", "channel_id", "content_type_id", "owner_agent_id",
       "distribution_mode", "status", "legacy_content_item_id", "source_system",
+      "approval_state", "publication_state", "delivered_by_agent_id",
     ],
     defaultOrder: "created_at",
+  },
+  "content-assets": {
+    table: "content_assets", mutable: true,
+    createFields: ["content_item_id", "asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id"],
+    updateFields: ["asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id"],
+    filters: ["content_item_id", "asset_role", "is_current", "attached_by_agent_id"], defaultOrder: "created_at",
+  },
+  "agent-work-items": {
+    table: "agent_work_items", mutable: true,
+    createFields: ["agent_id", "work_item_type", "title", "body", "summary", "attachments", "status", "content_item_id", "campaign_id", "project_id", "lane", "notes"],
+    updateFields: ["agent_id", "work_item_type", "title", "body", "summary", "attachments", "status", "content_item_id", "campaign_id", "project_id", "lane", "notes"],
+    filters: ["agent_id", "work_item_type", "status", "content_item_id", "campaign_id", "project_id", "lane"], defaultOrder: "updated_at",
+  },
+  "agent-work-dependencies": {
+    table: "agent_work_dependencies", mutable: true,
+    createFields: ["upstream_work_item_id", "downstream_work_item_id", "required", "notes"],
+    updateFields: ["required", "notes"], filters: ["upstream_work_item_id", "downstream_work_item_id", "required"], defaultOrder: "created_at",
+  },
+  "content-feedback": {
+    table: "content_feedback", mutable: true,
+    createFields: ["content_item_id", "campaign_id", "work_item_id", "body", "required", "status", "version", "provided_by", "applied_by_agent_id", "applied_at", "resolution_note", "supersedes_feedback_id"],
+    updateFields: ["body", "required", "status", "version", "provided_by", "applied_by_agent_id", "applied_at", "resolution_note", "supersedes_feedback_id"],
+    filters: ["content_item_id", "campaign_id", "work_item_id", "required", "status", "provided_by"], defaultOrder: "created_at",
+  },
+  "social-operations-queue": {
+    table: "social_operations_queue", mutable: false, createFields: [], updateFields: [],
+    filters: ["property_id", "platform", "owner_agent_id", "status", "approval_state", "publication_state", "has_unresolved_feedback", "ready_to_deliver"], defaultOrder: "publish_at",
   },
   "content-status-history": {
     table: "content_status_history",

@@ -70,7 +70,7 @@ function buildServiceUser(userId: string, email?: string) {
 
 export async function requireMember(
   request: Request,
-  options: { write?: boolean } = {},
+  options: { write?: boolean; allowAgentWrite?: boolean } = {},
 ): Promise<ApiContext | NextResponse> {
   const authorization = request.headers.get("authorization") || "";
   const [scheme, accessToken] = authorization.split(" ");
@@ -132,7 +132,7 @@ export async function requireMember(
     return unauthorized("This identity is not an active Operations Control member.", 403);
   }
 
-  if (options.write && !["owner", "operator"].includes(member.role)) {
+  if (options.write && !["owner", "operator"].includes(member.role) && !(options.allowAgentWrite && member.role === "agent")) {
     return unauthorized("This identity does not have write access.", 403);
   }
 

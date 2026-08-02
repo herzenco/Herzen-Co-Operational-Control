@@ -199,6 +199,8 @@ failed
 cancelled
 ```
 
+Creative fields are `caption` and `creative_asset_path`. The latter is a private object path in `content-creative-assets`, never a pasted public URL. Reads and successful writes return a derived `creative_attachment` object with `bucket`, `path`, and `attached: true`, or `null` when absent. Clients use that stable shape to request a temporary signed preview or download URL. Publication proof remains separate in `screenshot_path` and `content-publication-evidence`.
+
 ### Create a content item
 
 ```http
@@ -209,6 +211,8 @@ Content-Type: application/json
 {
   "title": "Founder operating note",
   "brief": "Turn K2's research into a concise LinkedIn post.",
+  "caption": "The final publishing caption.",
+  "creative_asset_path": "<user uuid>/content-record/image.jpg",
   "property_id": "<Herzen Co. property uuid>",
   "channel_id": "<Herzen Co. LinkedIn channel uuid>",
   "owner_agent_id": "<C-3PO uuid>",
@@ -226,7 +230,15 @@ the content item to `awaiting_tito` with the returned `approval_id`.
 
 Approving the linked approval automatically records Tito as `approved_by`,
 records `approved_at`, and moves the item to `approved`. Requesting changes
-moves it to `revision_requested`.
+moves it to `revision_requested`. A `changes_requested` or `declined` decision
+must include a non-empty `decision_note`; the API rejects the decision without
+one. Send `schedule_content: true` with an approved decision to move a dated
+item directly to `scheduled`.
+
+Every approval change is also captured in immutable `activity_log` history.
+OCC uses those snapshots for the Content page's Rejected section so Lupe and
+the assigned content owner can review old feedback even after a revised post is
+approved later.
 
 ### Record publication
 

@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
+import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
+import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
 
-type View = "command" | "kanban" | "list" | "worklogs" | "content" | "leads" | "approvals" | "workflows";
+type View = "command" | "kanban" | "list" | "worklogs" | "content" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
 
 type Viewer = {
@@ -42,6 +44,8 @@ type ContentForm = {
   title: string;
   brief: string;
   body: string;
+  caption: string;
+  creative_asset_path: string;
   property_id: string;
   channel_id: string;
   content_type_id: string;
@@ -57,6 +61,7 @@ type AgentForm = { code: string; name: string; role: string; lane: string; statu
 type WorkLogForm = { agent_id: string; task_id: string; entry_type: string; title: string; body: string; artifacts: string };
 type DailyUpdateForm = { agent_id: string; update_date: string; summary: string; completed: string; blockers: string; next_steps: string; asks: string; health: string };
 type LeadForm = { property_id: string; assigned_agent_id: string; contact_name: string; company: string; email: string; phone: string; source: string; subject: string; inquiry: string; status: string; priority: string; next_follow_up_at: string; notes: string };
+type ContentUtilityStatus = { contentId: string; message: string; kind: "success" | "error" };
 
 const EMPTY_FORM: TaskForm = {
   title: "",
@@ -73,6 +78,8 @@ const EMPTY_CONTENT_FORM: ContentForm = {
   title: "",
   brief: "",
   body: "",
+  caption: "",
+  creative_asset_path: "",
   property_id: "",
   channel_id: "",
   content_type_id: "",
@@ -111,6 +118,7 @@ const VIEWS: Array<{ id: View; label: string }> = [
   { id: "list", label: "List" },
   { id: "worklogs", label: "Work Logs" },
   { id: "content", label: "Content" },
+  { id: "agentops", label: "Agent Ops" },
   { id: "leads", label: "Leads" },
   { id: "approvals", label: "Approvals" },
   { id: "workflows", label: "Workflows" },
@@ -152,11 +160,38 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ");
 }
 
+function copyTextFallback(value: string) {
+  const field = document.createElement("textarea");
+  field.value = value;
+  field.setAttribute("readonly", "");
+  field.style.position = "fixed";
+  field.style.opacity = "0";
+  document.body.appendChild(field);
+  field.select();
+  const copied = document.execCommand("copy");
+  field.remove();
+  return copied;
+}
+
+function triggerFileDownload(url: string, filename: string, openInNewTab = false) {
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  if (openInNewTab) {
+    link.target = "_blank";
+    link.rel = "noopener noreferrer";
+  }
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+}
+
 export function CommandCenter() {
   const supabase = useMemo(() => createClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
   const [approvals, setApprovals] = useState<RecordValue[]>([]);
+  const [approvalActivity, setApprovalActivity] = useState<RecordValue[]>([]);
   const [updates, setUpdates] = useState<RecordValue[]>([]);
   const [workLogs, setWorkLogs] = useState<RecordValue[]>([]);
   const [contentItems, setContentItems] = useState<RecordValue[]>([]);
@@ -164,14 +199,24 @@ export function CommandCenter() {
   const [contentChannels, setContentChannels] = useState<RecordValue[]>([]);
   const [contentTypes, setContentTypes] = useState<RecordValue[]>([]);
   const [contentHistory, setContentHistory] = useState<RecordValue[]>([]);
+  const [agentWorkItems, setAgentWorkItems] = useState<RecordValue[]>([]);
+  const [workDependencies, setWorkDependencies] = useState<RecordValue[]>([]);
+  const [contentFeedback, setContentFeedback] = useState<RecordValue[]>([]);
+  const [socialQueue, setSocialQueue] = useState<RecordValue[]>([]);
   const [view, setView] = useState<View>("command");
   const [lane, setLane] = useState("all");
   const [query, setQuery] = useState("");
   const [contentPlatform, setContentPlatform] = useState("all");
   const [contentAccount, setContentAccount] = useState("all");
   const [contentType, setContentType] = useState("all");
+  const [opsAgent, setOpsAgent] = useState("all");
+  const [opsProperty, setOpsProperty] = useState("all");
+  const [opsPlatform, setOpsPlatform] = useState("all");
+  const [opsStatus, setOpsStatus] = useState("all");
+  const [opsSignal, setOpsSignal] = useState("all");
+  const [opsPublishDate, setOpsPublishDate] = useState("");
   const [todayLabel, setTodayLabel] = useState("Today");
-  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | null>(null);
+  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
   const [selectedContent, setSelectedContent] = useState<RecordValue | null>(null);
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
@@ -184,6 +229,18 @@ export function CommandCenter() {
   const [leadForm, setLeadForm] = useState<LeadForm>(EMPTY_LEAD_FORM);
   const [leadStatus, setLeadStatus] = useState("all");
   const [evidenceFile, setEvidenceFile] = useState<File | null>(null);
+  const [creativeFile, setCreativeFile] = useState<File | null>(null);
+  const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
+  const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
+  const [contentMediaErrors, setContentMediaErrors] = useState<Record<string, string>>({});
+  const [contentUtilityStatus, setContentUtilityStatus] = useState<ContentUtilityStatus | null>(null);
+  const [downloadingContentId, setDownloadingContentId] = useState("");
+  const [rejectingContent, setRejectingContent] = useState<RecordValue | null>(null);
+  const [rejectionReason, setRejectionReason] = useState("");
+  const [reviewSaving, setReviewSaving] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState("");
+  const [selectedPropertyId, setSelectedPropertyId] = useState("");
+  const [selectedPropertyPlatform, setSelectedPropertyPlatform] = useState("");
   const [error, setError] = useState("");
   const [busy, startTransition] = useTransition();
 
@@ -208,6 +265,44 @@ export function CommandCenter() {
       subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      setCalendarMonth(new Date().toLocaleDateString("en-CA", { year: "numeric", month: "2-digit", timeZone: "America/New_York" }));
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    const paths = contentItems
+      .map((item) => {
+        return { id: String(item.id), path: contentCreativePath(item), externalUrl: contentCreativeExternalUrl(item), downloadName: contentCreativeDownloadName(item) };
+      })
+      .filter((item) => item.path || item.externalUrl);
+    if (!paths.length) {
+      const timer = window.setTimeout(() => {
+        setContentMediaUrls({});
+        setContentDownloadUrls({});
+        setContentMediaErrors({});
+      }, 0);
+      return () => window.clearTimeout(timer);
+    }
+    let cancelled = false;
+    void Promise.all(paths.map(async ({ id, path, externalUrl, downloadName }) => {
+      if (externalUrl) return { id, preview: externalUrl, download: externalUrl, error: "" };
+      const [preview, download] = await Promise.all([
+        supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600),
+        supabase.storage.from(CONTENT_CREATIVE_BUCKET).createSignedUrl(path, 3600, { download: downloadName }),
+      ]);
+      return { id, preview: preview.data?.signedUrl || "", download: download.data?.signedUrl || "", error: preview.error?.message || download.error?.message || "" };
+    })).then((urls) => {
+      if (cancelled) return;
+      setContentMediaUrls(Object.fromEntries(urls.map(({ id, preview }) => [id, preview])));
+      setContentDownloadUrls(Object.fromEntries(urls.map(({ id, download }) => [id, download])));
+      setContentMediaErrors(Object.fromEntries(urls.filter(({ error }) => error).map(({ id, error }) => [id, error])));
+    });
+    return () => { cancelled = true; };
+  }, [contentItems, supabase]);
 
   useEffect(() => {
     if (!session) return;
@@ -241,6 +336,19 @@ export function CommandCenter() {
     return payload;
   }
 
+  async function downloadDeliverable(item: RecordValue) {
+    try {
+      setError("");
+      const payload = await request(`/api/v1/content-items/${item.id}/deliverable`);
+      const blob = new Blob([JSON.stringify(payload.data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      triggerFileDownload(url, `occ-${String(item.title || item.id).toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "The package is blocked from delivery.");
+    }
+  }
+
   async function refreshAll(accessToken: string) {
     try {
       setError("");
@@ -255,7 +363,12 @@ export function CommandCenter() {
         channelsResponse,
         typesResponse,
         historyResponse,
+        approvalActivityResponse,
         leadsResponse,
+        agentWorkResponse,
+        workDependencyResponse,
+        feedbackResponse,
+        socialQueueResponse,
       ] = await Promise.all([
         fetch("/api/v1/overview", { headers }),
         fetch("/api/v1/approvals?limit=200&offset=0", { headers }),
@@ -266,7 +379,12 @@ export function CommandCenter() {
         fetch("/api/v1/content-channels?limit=100&offset=0", { headers }),
         fetch("/api/v1/content-types?limit=100&offset=0", { headers }),
         fetch("/api/v1/content-status-history?limit=500&offset=0", { headers }),
+        fetch("/api/v1/activity?entity_type=approvals&limit=500&offset=0", { headers }),
         fetch("/api/v1/leads?limit=500&offset=0", { headers }),
+        fetch("/api/v1/agent-work-items?limit=500&offset=0", { headers }),
+        fetch("/api/v1/agent-work-dependencies?limit=500&offset=0", { headers }),
+        fetch("/api/v1/content-feedback?limit=500&offset=0", { headers }),
+        fetch("/api/v1/social-operations-queue?limit=500&offset=0", { headers }),
       ]);
       const [
         overviewPayload,
@@ -278,7 +396,12 @@ export function CommandCenter() {
         channelsPayload,
         typesPayload,
         historyPayload,
+        approvalActivityPayload,
         leadsPayload,
+        agentWorkPayload,
+        workDependencyPayload,
+        feedbackPayload,
+        socialQueuePayload,
       ] = await Promise.all([
         overviewResponse.json(),
         approvalsResponse.json(),
@@ -289,7 +412,12 @@ export function CommandCenter() {
         channelsResponse.json(),
         typesResponse.json(),
         historyResponse.json(),
+        approvalActivityResponse.json(),
         leadsResponse.json(),
+        agentWorkResponse.json(),
+        workDependencyResponse.json(),
+        feedbackResponse.json(),
+        socialQueueResponse.json(),
       ]);
       if (!overviewResponse.ok) throw new Error(overviewPayload?.error?.message || "Could not load operations.");
       const contentResponses = [
@@ -319,7 +447,12 @@ export function CommandCenter() {
       setContentChannels(channelsPayload.data.items);
       setContentTypes(typesPayload.data.items);
       setContentHistory(historyPayload.data.items);
+      setApprovalActivity(approvalActivityResponse.ok ? approvalActivityPayload.data.items : []);
       setLeads(leadsResponse.ok ? leadsPayload.data.items : []);
+      setAgentWorkItems(agentWorkResponse.ok ? agentWorkPayload.data.items : []);
+      setWorkDependencies(workDependencyResponse.ok ? workDependencyPayload.data.items : []);
+      setContentFeedback(feedbackResponse.ok ? feedbackPayload.data.items : []);
+      setSocialQueue(socialQueueResponse.ok ? socialQueuePayload.data.items : []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load operations.");
     }
@@ -547,14 +680,72 @@ export function CommandCenter() {
     return text(contentTypeMap.get(String(item.content_type_id))?.name, "K2 to decide");
   }
 
+  function contentPictureUrl(item: RecordValue) {
+    return contentMediaUrls[String(item.id)] || "";
+  }
+
+  function contentPictureDownloadUrl(item: RecordValue) {
+    return contentDownloadUrls[String(item.id)] || contentPictureUrl(item);
+  }
+
+  async function copyContentCaption(item: RecordValue) {
+    const contentId = String(item.id);
+    const caption = text(item.caption, "").trim();
+    if (!caption) {
+      setContentUtilityStatus({ contentId, message: "No caption is available to copy.", kind: "error" });
+      return;
+    }
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(caption);
+      } else if (!copyTextFallback(caption)) {
+        throw new Error("Clipboard access is unavailable.");
+      }
+      setContentUtilityStatus({ contentId, message: "Caption copied.", kind: "success" });
+    } catch {
+      setContentUtilityStatus({ contentId, message: "Could not copy the caption. Check browser clipboard access.", kind: "error" });
+    }
+  }
+
+  async function downloadContentPicture(item: RecordValue) {
+    const contentId = String(item.id);
+    const downloadUrl = contentPictureDownloadUrl(item);
+    if (!downloadUrl) {
+      setContentUtilityStatus({ contentId, message: "No downloadable image is attached.", kind: "error" });
+      return;
+    }
+    const filename = contentCreativeDownloadName(item);
+    setDownloadingContentId(contentId);
+    try {
+      if (contentCreativePath(item)) {
+        triggerFileDownload(downloadUrl, filename);
+      } else {
+        const response = await fetch(downloadUrl, { credentials: "omit" });
+        if (!response.ok) throw new Error(`Image request failed (${response.status}).`);
+        const objectUrl = URL.createObjectURL(await response.blob());
+        triggerFileDownload(objectUrl, filename);
+        window.setTimeout(() => URL.revokeObjectURL(objectUrl), 1_000);
+      }
+      setContentUtilityStatus({ contentId, message: "Image download started.", kind: "success" });
+    } catch {
+      triggerFileDownload(downloadUrl, filename, true);
+      setContentUtilityStatus({ contentId, message: "The image opened in a new tab. Save it from there if the download did not begin.", kind: "error" });
+    } finally {
+      setDownloadingContentId("");
+    }
+  }
+
   function openContent(item?: RecordValue) {
     const nextItem = item || null;
     setSelectedContent(nextItem);
     setEvidenceFile(null);
+    setCreativeFile(null);
     setContentForm(nextItem ? {
       title: text(nextItem.title, ""),
       brief: text(nextItem.brief, ""),
       body: text(nextItem.body, ""),
+      caption: text(nextItem.caption, ""),
+      creative_asset_path: contentCreativePath(nextItem),
       property_id: text(nextItem.property_id, ""),
       channel_id: text(nextItem.channel_id, ""),
       content_type_id: text(nextItem.content_type_id, ""),
@@ -568,6 +759,73 @@ export function CommandCenter() {
     setDrawer("content");
   }
 
+  function previewContent(item: RecordValue) {
+    setSelectedContent(item);
+    setDrawer("contentPreview");
+  }
+
+  function openContentRejection(item: RecordValue) {
+    setError("");
+    setRejectingContent(item);
+    setRejectionReason("");
+  }
+
+  async function ensureContentApproval(item: RecordValue) {
+    const existing = approvals.find((approval) => String(approval.id) === String(item.approval_id));
+    if (existing) return existing;
+    if (!lupe) throw new Error("Lupe must exist in the agent roster before content can be reviewed.");
+    const approvalPayload = await request("/api/v1/approvals", {
+      method: "POST",
+      body: JSON.stringify({
+        content_item_id: item.id,
+        requested_by_agent_id: lupe.id,
+        reviewer_agent_id: lupe.id,
+        title: `Content approval: ${text(item.title)}`,
+        summary: text(item.brief || item.body || item.caption, "Content submitted for review."),
+        evidence: [`Property: ${contentPropertyName(item)}`, `Channel: ${contentAccountName(item)}`, `Format: ${contentTypeName(item)}`],
+        recommendation: "Approve for the documented publish date or return specific feedback to Lupe.",
+        status: "pending",
+        due_at: item.publish_at || null,
+      }),
+    });
+    await request(`/api/v1/content-items/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ approval_id: approvalPayload.data.id, status: "awaiting_tito" }),
+    });
+    return approvalPayload.data as RecordValue;
+  }
+
+  async function reviewContent(item: RecordValue, decision: "approved" | "changes_requested", note = "") {
+    const decisionNote = note.trim();
+    if (decision === "changes_requested" && !decisionNote) {
+      setError("A rejection reason is required for Lupe and C-3PO.");
+      return;
+    }
+    try {
+      setError("");
+      setReviewSaving(true);
+      const approval = await ensureContentApproval(item);
+      await request(`/api/v1/approvals/${approval.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          status: decision,
+          decision_note: decisionNote || null,
+          decided_at: new Date().toISOString(),
+          schedule_content: decision === "approved" && Boolean(item.publish_at),
+        }),
+      });
+      setDrawer(null);
+      setSelectedContent(null);
+      setRejectingContent(null);
+      setRejectionReason("");
+      if (session) await refreshAll(session.access_token);
+    } catch (reviewError) {
+      setError(reviewError instanceof Error ? reviewError.message : "Could not record the content decision.");
+    } finally {
+      setReviewSaving(false);
+    }
+  }
+
   function channelsForProperty(propertyId: string) {
     return contentChannels.filter((channel) =>
       String(channel.property_id) === propertyId && text(channel.status, "active") !== "archived"
@@ -579,9 +837,36 @@ export function CommandCenter() {
       setError("Content requires a title, property, and publishing channel.");
       return;
     }
+    const chosenProperty = contentProperties.find((property) => String(property.id) === contentForm.property_id);
+    const chosenOwner = agents.find((agent) => String(agent.id) === contentForm.owner_agent_id);
+    const requiresBubblesCreative = text(chosenProperty?.slug, "").toLowerCase() === "bubbles-n-salt"
+      && text(chosenOwner?.code, "").toLowerCase() === "c-3po";
+    if (requiresBubblesCreative && !contentForm.caption.trim()) {
+      setError("Bubbles n Salt posts owned by C-3PO require the final caption.");
+      return;
+    }
+    if (requiresBubblesCreative && !creativeFile && !contentForm.creative_asset_path) {
+      setError("Bubbles n Salt posts owned by C-3PO require an uploaded post image.");
+      return;
+    }
 
     try {
       setError("");
+      let creativeAssetPath = contentForm.creative_asset_path;
+      if (creativeFile) {
+        if (!session?.user.id) throw new Error("Your session expired.");
+        const extension = creativeFile.name.split(".").pop()?.toLowerCase() || "png";
+        const objectPath = `${session.user.id}/${selectedContent?.id || crypto.randomUUID()}/${crypto.randomUUID()}.${extension}`;
+        const { error: creativeUploadError } = await supabase.storage
+          .from(CONTENT_CREATIVE_BUCKET)
+          .upload(objectPath, creativeFile, {
+            cacheControl: "3600",
+            contentType: creativeFile.type,
+            upsert: false,
+          });
+        if (creativeUploadError) throw creativeUploadError;
+        creativeAssetPath = objectPath;
+      }
       let screenshotPath = text(selectedContent?.screenshot_path, "");
       if (evidenceFile) {
         if (!session?.user.id) throw new Error("Your session expired.");
@@ -602,6 +887,8 @@ export function CommandCenter() {
         title: contentForm.title.trim(),
         brief: contentForm.brief.trim() || null,
         body: contentForm.body.trim() || null,
+        caption: contentForm.caption.trim() || null,
+        creative_asset_path: creativeAssetPath || null,
         property_id: contentForm.property_id,
         channel_id: contentForm.channel_id,
         content_type_id: contentForm.content_type_id || null,
@@ -631,6 +918,7 @@ export function CommandCenter() {
       setSelectedContent(null);
       setContentForm(EMPTY_CONTENT_FORM);
       setEvidenceFile(null);
+      setCreativeFile(null);
       if (session) await refreshAll(session.access_token);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the content item.");
@@ -852,6 +1140,59 @@ export function CommandCenter() {
     );
   }
 
+  function renderAgentOps() {
+    const agentById = new Map(agents.map((agent) => [String(agent.id), text(agent.name || agent.code)]));
+    const propertyById = new Map(contentProperties.map((property) => [String(property.id), text(property.name)]));
+    const queueById = new Map(socialQueue.map((item) => [String(item.id), item]));
+    const workById = new Map(agentWorkItems.map((item) => [String(item.id), item]));
+    const blockedWork = new Set(workDependencies.filter((dependency) => {
+      if (dependency.required !== true) return false;
+      const upstream = workById.get(String(dependency.upstream_work_item_id));
+      return upstream && !["final", "delivered"].includes(text(upstream.status));
+    }).map((dependency) => String(dependency.downstream_work_item_id)));
+    const filtered = contentItems.filter((item) => {
+      const queue = queueById.get(String(item.id));
+      return (opsAgent === "all" || String(item.owner_agent_id) === opsAgent)
+        && (opsProperty === "all" || String(item.property_id) === opsProperty)
+        && (opsPlatform === "all" || String(queue?.platform) === opsPlatform)
+        && (opsStatus === "all" || String(item.status) === opsStatus)
+        && (!opsPublishDate || String(item.publish_at || "").slice(0, 10) === opsPublishDate)
+        && (opsSignal === "all"
+          || (opsSignal === "blocked" && agentWorkItems.some((work) => String(work.content_item_id) === String(item.id) && blockedWork.has(String(work.id))))
+          || (opsSignal === "feedback" && queue?.has_unresolved_feedback === true)
+          || (opsSignal === "ready" && queue?.ready_to_deliver === true));
+    }).sort((a, b) => String(a.publish_at || "9999").localeCompare(String(b.publish_at || "9999")));
+
+    return <div className="agentOpsDeck">
+      <section className="deckPanel opsControlPanel">
+        <header className="panelHead"><div><span>Canonical social operations</span><h2>Agent handoffs and delivery queue</h2></div><small>{agentWorkItems.length} artifacts · {contentFeedback.filter((item) => item.required === true && ["received", "blocked"].includes(text(item.status))).length} unresolved feedback</small></header>
+        <div className="opsViewFilters">
+          <label>Agent<select value={opsAgent} onChange={(event) => setOpsAgent(event.target.value)}><option value="all">All agents</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
+          <label>Brand<select value={opsProperty} onChange={(event) => setOpsProperty(event.target.value)}><option value="all">All brands</option>{contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)}>{text(property.name)}</option>)}</select></label>
+          <label>Platform<select value={opsPlatform} onChange={(event) => setOpsPlatform(event.target.value)}><option value="all">All platforms</option>{[...new Set(socialQueue.map((item) => text(item.platform)).filter((item) => item !== "—"))].map((platform) => <option key={platform}>{platform}</option>)}</select></label>
+          <label>Status<select value={opsStatus} onChange={(event) => setOpsStatus(event.target.value)}><option value="all">All statuses</option>{Object.keys(CONTENT_STATUS_LABELS).map((status) => <option key={status} value={status}>{CONTENT_STATUS_LABELS[status]}</option>)}</select></label>
+          <label>Signal<select value={opsSignal} onChange={(event) => setOpsSignal(event.target.value)}><option value="all">All records</option><option value="blocked">Dependency blocked</option><option value="feedback">Feedback unresolved</option><option value="ready">Ready to deliver</option></select></label>
+          <label>Publish date<input type="date" value={opsPublishDate} onChange={(event) => setOpsPublishDate(event.target.value)} /></label>
+        </div>
+      </section>
+      <section className="opsPackageGrid">
+        {filtered.map((item) => {
+          const queue = queueById.get(String(item.id));
+          const work = agentWorkItems.filter((artifact) => String(artifact.content_item_id) === String(item.id) || String(artifact.campaign_id) === String(item.id));
+          const feedback = contentFeedback.filter((entry) => String(entry.content_item_id) === String(item.id));
+          const dependencyBlocked = work.some((artifact) => blockedWork.has(String(artifact.id)));
+          return <article className="deckPanel opsPackageCard" key={String(item.id)}>
+            <header><div><span>{propertyById.get(String(item.property_id)) || "Unknown brand"} · {text(queue?.platform)}</span><h3>{text(item.title)}</h3></div><b className={queue?.ready_to_deliver === true ? "readySignal" : "blockedSignal"}>{queue?.ready_to_deliver === true ? "Ready" : "Gated"}</b></header>
+            <p>{dateLabel(item.publish_at)} · {CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))} · {agentById.get(String(item.owner_agent_id)) || "Unassigned"}</p>
+            <div className="handoffChain">{work.length ? work.map((artifact, index) => <span key={String(artifact.id)} className={blockedWork.has(String(artifact.id)) ? "blocked" : ""}>{index > 0 && <i>→</i>}<b>{agentById.get(String(artifact.agent_id)) || "Agent"}</b><small>{text(artifact.work_item_type)} · {text(artifact.status)}</small></span>) : <em>No agent artifacts linked</em>}</div>
+            <footer><span>{dependencyBlocked ? "Dependency blocked" : feedback.some((entry) => entry.required === true && ["received", "blocked"].includes(text(entry.status))) ? "Required feedback unresolved" : `${work.length} linked artifacts`}</span><button className="outlineBtn" disabled={queue?.ready_to_deliver !== true} onClick={() => void downloadDeliverable(item)}>Download final package</button></footer>
+          </article>;
+        })}
+        {!filtered.length && <p className="opsEmpty">No packages match this operations view.</p>}
+      </section>
+    </div>;
+  }
+
   function renderContent() {
     const platforms = [...new Set(contentChannels.map((channel) => text(channel.platform)).filter(Boolean))].sort();
     const accounts = [...new Set(contentChannels.map((channel) => text(channel.account_name)).filter(Boolean))].sort();
@@ -867,8 +1208,68 @@ export function CommandCenter() {
     const scheduled = filteredContent.filter((item) => ["scheduled", "publishing"].includes(text(item.status)));
     const inReview = filteredContent.filter((item) => ["ready_for_lupe", "awaiting_tito", "revision_requested"].includes(text(item.status)));
     const published = filteredContent.filter((item) => text(item.status) === "published");
+    const monthDate = calendarMonth ? new Date(`${calendarMonth}-01T12:00:00`) : new Date();
+    const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
+    const gridStart = new Date(monthStart);
+    gridStart.setDate(monthStart.getDate() - monthStart.getDay());
+    const calendarDays = Array.from({ length: 42 }, (_, index) => {
+      const day = new Date(gridStart);
+      day.setDate(gridStart.getDate() + index);
+      return day;
+    });
+    const selectedProperty = contentProperties.find((property) => String(property.id) === selectedPropertyId) || contentProperties[0];
+    const propertyChannels = selectedProperty ? contentChannels.filter((channel) => String(channel.property_id) === String(selectedProperty.id)) : [];
+    const propertyPlatforms = [...new Set(propertyChannels.map((channel) => text(channel.platform)).filter(Boolean))];
+    const activePropertyPlatform = propertyPlatforms.includes(selectedPropertyPlatform) ? selectedPropertyPlatform : (propertyPlatforms[0] || "");
+    const previewItems = contentItems.filter((item) =>
+      String(item.property_id) === String(selectedProperty?.id) && contentPlatformForItem(item) === activePropertyPlatform
+    ).sort((left, right) => new Date(String(right.publish_at || right.created_at)).getTime() - new Date(String(left.publish_at || left.created_at)).getTime());
+    const rejectedFeedback = rejectionHistoryFromActivity(approvalActivity);
+    for (const approval of approvals) {
+      const decision = text(approval.status, "");
+      const reason = text(approval.decision_note, "").trim();
+      const contentItemId = text(approval.content_item_id, "");
+      const alreadyCaptured = rejectedFeedback.some((entry) => entry.approvalId === String(approval.id) && entry.reason === reason);
+      if (["changes_requested", "declined"].includes(decision) && reason && contentItemId && !alreadyCaptured) {
+        rejectedFeedback.push({
+          id: `current-${String(approval.id)}`,
+          approvalId: String(approval.id),
+          contentItemId,
+          decision: decision as "changes_requested" | "declined",
+          reason,
+          decidedAt: text(approval.decided_at || approval.updated_at, ""),
+        });
+      }
+    }
+    const changeMonth = (amount: number) => {
+      const next = new Date(monthDate.getFullYear(), monthDate.getMonth() + amount, 1);
+      setCalendarMonth(next.toLocaleDateString("en-CA", { year: "numeric", month: "2-digit" }));
+    };
     return (
       <div className="contentWorkspace">
+        <section className="deckPanel propertyPanel">
+          <header className="panelHead"><div><span>Properties</span><h2>Channel preview</h2></div><small>See the feed before it publishes</small></header>
+          <div className="propertyTabs" role="tablist" aria-label="Publishing properties">
+            {contentProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
+          </div>
+          {selectedProperty && <div className="propertyPreview">
+            <div className="platformTabs" role="tablist" aria-label={`${text(selectedProperty.name)} platforms`}>
+              {propertyPlatforms.map((platform) => <button key={platform} role="tab" aria-selected={platform === activePropertyPlatform} className={platform === activePropertyPlatform ? "active" : ""} onClick={() => setSelectedPropertyPlatform(platform)}>{platform}</button>)}
+            </div>
+            <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
+            <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
+              {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
+                {contentPictureUrl(item) ? <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={contentPictureUrl(item)} alt={`Preview for ${text(item.title)}`} />
+                </> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
+                <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
+              </button>)}
+              {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
+            </div>
+          </div>}
+        </section>
+
         <section className="metricDeck contentMetrics">
           <div><span>Scheduled</span><strong>{String(scheduled.length).padStart(2, "0")}</strong><small>Approved content moving toward publication</small></div>
           <div><span>With Tito</span><strong>{String(inReview.length).padStart(2, "0")}</strong><small>Lupe-managed review and revision packages</small></div>
@@ -876,8 +1277,31 @@ export function CommandCenter() {
           <div><span>Properties</span><strong>{contentProperties.filter((property) => text(property.status) === "active").length}</strong><small>{contentProperties.filter((property) => text(property.status) === "paused").length} property paused</small></div>
         </section>
 
+        <section className="deckPanel publishingCalendar">
+          <header className="panelHead calendarPanelHead"><div><span>Publishing calendar</span><h2>{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(monthDate)}</h2></div><div className="calendarControls"><button onClick={() => changeMonth(-1)} aria-label="Previous month">←</button><button onClick={() => changeMonth(1)} aria-label="Next month">→</button><button className="liveBtn" onClick={() => openContent()}>New content</button></div></header>
+          <div className="propertyLegend" aria-label="Property color key">
+            {contentProperties.map((property, index) => <span key={String(property.id)}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}</span>)}
+          </div>
+          <div className="publishingCalendarGrid">
+            {calendarDays.map((day) => {
+              const dayKey = day.toLocaleDateString("en-CA");
+              const dayItems = filteredContent.filter((item) => item.publish_at && new Date(String(item.publish_at)).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === dayKey);
+              return <div key={dayKey} className={`publishingDay ${day.getMonth() !== monthDate.getMonth() ? "outside" : ""}`}>
+                <time>{day.getDate()}</time>
+                {dayItems.map((item) => {
+                  const propertyIndex = Math.max(0, contentProperties.findIndex((property) => String(property.id) === String(item.property_id)));
+                  return <button key={String(item.id)} className={`calendarContent tone${propertyIndex % 4}`} onClick={() => previewContent(item)}>
+                    <b>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</b>
+                    <span>{text(item.title)}</span><small>{contentPlatformForItem(item)}</small>
+                  </button>;
+                })}
+              </div>;
+            })}
+          </div>
+        </section>
+
         <section className="deckPanel contentSchedule">
-          <header className="panelHead"><div><span>Publishing desk</span><h2>Content operations</h2></div><button className="liveBtn" onClick={() => openContent()}>New content</button></header>
+          <header className="panelHead"><div><span>Posts</span><h2>Review every caption and creative</h2></div><small>Open a post to approve it or return feedback</small></header>
           <div className="contentFilters">
             <label>Platform<select value={contentPlatform} onChange={(event) => setContentPlatform(event.target.value)}><option value="all">All platforms</option>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select></label>
             <label>Account<select value={contentAccount} onChange={(event) => setContentAccount(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select></label>
@@ -885,10 +1309,16 @@ export function CommandCenter() {
             {(contentPlatform !== "all" || contentAccount !== "all" || contentType !== "all") && <button className="ghostBtn" onClick={() => { setContentPlatform("all"); setContentAccount("all"); setContentType("all"); }}>Clear filters</button>}
           </div>
           <div className="contentHead"><span>Date</span><span>Content</span><span>Platform</span><span>Account</span><span>Owner</span><span>Stage</span><span /></div>
-          {filteredContent.map((item) => (
-            <article key={String(item.id)}>
+          <div className="contentCards" aria-label="Content review queue">{filteredContent.map((item) => (
+            <article key={String(item.id)} className={`${contentPlatformForItem(item).toLowerCase() === "instagram" ? "instagramReviewCard" : ""} ${isContentReviewable(item.status) ? "reviewable" : ""}`.trim()}>
               <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
-              <button className="contentTitle contentTitleButton" onClick={() => openContent(item)}><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small></button>
+              <button type="button" className="mobilePostCreative" onClick={() => previewContent(item)} aria-label={`Open ${text(item.title)} preview`}>
+                {contentPictureUrl(item) ? <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={contentPictureUrl(item)} alt={`Creative for ${text(item.title)}`} />
+                </> : <span><b>{initials(contentPropertyName(item))}</b><small>Creative unavailable</small></span>}
+              </button>
+              <button type="button" className="contentTitle contentTitleButton" onClick={() => previewContent(item)}><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small><span className="mobileContentCaption">{text(item.caption, "No caption documented.")}</span>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</button>
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
               <button className="ownerLink" onClick={() => { const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
@@ -903,24 +1333,29 @@ export function CommandCenter() {
                 {["publishing", "failed"].includes(text(item.status)) && <button onClick={() => openContent(item)}>Record result</button>}
                 {text(item.status) === "published" && Boolean(item.final_url) && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
               </span>
+              {contentPlatformForItem(item).toLowerCase() === "instagram" && <div className="mobilePostTools">
+                <button className="outlineBtn" disabled={!text(item.caption, "").trim()} onClick={() => void copyContentCaption(item)}>Copy caption</button>
+                <button className="outlineBtn" disabled={!contentPictureDownloadUrl(item) || downloadingContentId === String(item.id)} onClick={() => void downloadContentPicture(item)}>{downloadingContentId === String(item.id) ? "Preparing…" : "Download image"}</button>
+                {contentUtilityStatus?.contentId === String(item.id) && <span className={`contentUtilityStatus ${contentUtilityStatus.kind}`} role="status" aria-live="polite">{contentUtilityStatus.message}</span>}
+              </div>}
+              {contentPlatformForItem(item).toLowerCase() === "instagram" && isContentReviewable(item.status) && <div className="mobileReviewActions">
+                <button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(item)}>Reject</button>
+                <button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(item, "approved")}>Approve</button>
+              </div>}
             </article>
           ))}
           {!filteredContent.length && <div className="opsEmpty">{contentItems.length ? "No content matches the selected filters." : "No content records yet. Create the first item and move it through research, production, Tito approval, and publishing."}</div>}
+          </div>
         </section>
 
-        <section className="deckPanel propertyPanel">
-          <header className="panelHead"><div><span>Properties</span><h2>Publishing destinations</h2></div><small>Configured operating map</small></header>
-          <div className="propertyGrid">
-            {contentProperties.map((property) => (
-              <article key={String(property.id)} className={text(property.status) === "paused" ? "paused" : ""}>
-                <header><b>{text(property.name)}</b><span>{text(property.status)}</span></header>
-                {contentChannels.filter((channel) => String(channel.property_id) === String(property.id)).map((channel) => (
-                  <div key={String(channel.id)}><span>{text(channel.platform)}</span><small>{text(channel.publishing_mode).replaceAll("_", " ")}</small></div>
-                ))}
-                <p>{text(property.notes, "No operating note.")}</p>
-              </article>
-            ))}
-          </div>
+        <section className="deckPanel rejectedContent">
+          <header className="panelHead"><div><span>Rejected</span><h2>Feedback Lupe must carry forward</h2></div><small>Permanent decision history</small></header>
+          {rejectedFeedback.map((feedback) => {
+            const item = contentItems.find((entry) => String(entry.id) === feedback.contentItemId);
+            const owner = item ? agentMap.get(String(item.owner_agent_id)) : "Content owner";
+            return <button key={feedback.id} className="rejectedContentRow" onClick={() => item && previewContent(item)}><span><b>{text(item?.title, "Archived content decision")}</b><small>{item ? contentPropertyName(item) : "Content"} · {dateLabel(feedback.decidedAt)} · For Lupe + {owner || "content owner"}</small></span><p>{feedback.reason}</p></button>;
+          })}
+          {!rejectedFeedback.length && <p className="opsEmpty">No rejected posts. Feedback will remain here for Lupe and the content owner after a post is returned.</p>}
         </section>
       </div>
     );
@@ -1031,6 +1466,7 @@ export function CommandCenter() {
           {view === "kanban" && renderKanban()}
           {view === "worklogs" && renderWorkLogs()}
           {view === "content" && renderContent()}
+          {view === "agentops" && renderAgentOps()}
           {view === "leads" && renderLeads()}
           {view === "approvals" && renderApprovals()}
           {view === "workflows" && session?.access_token && <WorkflowDesigner accessToken={session.access_token} />}
@@ -1066,6 +1502,54 @@ export function CommandCenter() {
                 <button className="liveBtn full" type="submit">Issue instruction</button>
               </form>
             )}
+            {drawer === "contentPreview" && selectedContent && (
+              <div className="contentPreviewDrawer">
+                <span className="liveLabel"><i />Content preview</span>
+                <h2>{text(selectedContent.title)}</h2>
+                <div className="contentPreviewMeta">
+                  <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
+                </div>
+                <article className={`contentPostMockup ${contentPlatformForItem(selectedContent).toLowerCase()}`}>
+                  <header><span className="feedAvatar">{initials(contentPropertyName(selectedContent))}</span><div><b>{contentPropertyName(selectedContent)}</b><small>{contentAccountName(selectedContent)}</small></div><span>•••</span></header>
+                  {contentPictureUrl(selectedContent) ? (
+                    <figure className="contentCreative">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={contentPictureUrl(selectedContent)} alt={`Creative for ${text(selectedContent.title)}`} />
+                      <figcaption>Original stored creative · secure preview</figcaption>
+                    </figure>
+                  ) : (
+                    <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>{contentCreativePath(selectedContent) ? "Creative file unavailable" : "No creative attached yet"}</b><small>{contentCreativePath(selectedContent) ? `The record is attached to ${contentCreativePath(selectedContent)}, but Storage could not resolve it${contentMediaErrors[String(selectedContent.id)] ? `: ${contentMediaErrors[String(selectedContent.id)]}` : "."}` : "Add the final image in Edit content so it can be previewed and downloaded here."}</small></div>
+                  )}
+                  <div className="contentPostSignals" aria-hidden="true"><span>♡</span><span>○</span><span>⌁</span><span>▱</span></div>
+                  <section className="contentPostCaption"><b>{contentAccountName(selectedContent)}</b><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
+                  {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && <div className="contentPostUtilityActions">
+                    <button className="outlineBtn" disabled={!text(selectedContent.caption, "").trim()} onClick={() => void copyContentCaption(selectedContent)}>Copy caption</button>
+                    <button className="liveBtn" disabled={!contentPictureDownloadUrl(selectedContent) || downloadingContentId === String(selectedContent.id)} onClick={() => void downloadContentPicture(selectedContent)}>{downloadingContentId === String(selectedContent.id) ? "Preparing download…" : "Download image"}</button>
+                    {contentUtilityStatus?.contentId === String(selectedContent.id) && <span className={`contentUtilityStatus ${contentUtilityStatus.kind}`} role="status" aria-live="polite">{contentUtilityStatus.message}</span>}
+                  </div>}
+                </article>
+                {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
+                {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
+                {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && isContentReviewable(selectedContent.status) && <section className="contentReviewDecision">
+                  <span>Review decision</span>
+                  <p>Approve this post for its documented date, or reject it and leave specific feedback for Lupe and {agentMap.get(String(selectedContent.owner_agent_id)) || "the content owner"}.</p>
+                  <div><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Reject</button><button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(selectedContent, "approved")}>{selectedContent.publish_at ? "Approve & schedule" : "Approve post"}</button></div>
+                  {!selectedContent.publish_at && <small>Add a publish date before approval to place this post directly on the calendar.</small>}
+                </section>}
+                <dl className="contentPreviewFacts">
+                  <div><dt>Publishes</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Not scheduled"}</dd></div>
+                  <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
+                  <div><dt>Owner</dt><dd>{agentMap.get(String(selectedContent.owner_agent_id)) || "Unassigned"}</dd></div>
+                  <div><dt>Distribution</dt><dd>{text(selectedContent.distribution_mode)}</dd></div>
+                  <div><dt>Post image asset</dt><dd>{contentCreativePath(selectedContent) || "Not uploaded"}</dd></div>
+                  <div><dt>Publication proof</dt><dd>{selectedContent.screenshot_path ? "Screenshot stored separately" : "Not recorded"}</dd></div>
+                </dl>
+                <div className="previewActions">
+                  {Boolean(selectedContent.final_url) && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
+                  <button className="outlineBtn" onClick={() => openContent(selectedContent)}>Edit content</button>
+                </div>
+              </div>
+            )}
             {drawer === "content" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveContent(); }}>
                 <span className="liveLabel"><i />Content operations</span>
@@ -1074,6 +1558,11 @@ export function CommandCenter() {
                 <label>Title<input value={contentForm.title} onChange={(event) => setContentForm({ ...contentForm, title: event.target.value })} placeholder="What are we publishing?" /></label>
                 <label>Brief<textarea value={contentForm.brief} onChange={(event) => setContentForm({ ...contentForm, brief: event.target.value })} placeholder="Audience, objective, offer, and required context." /></label>
                 <label>Draft / final copy<textarea className="contentBodyField" value={contentForm.body} onChange={(event) => setContentForm({ ...contentForm, body: event.target.value })} placeholder="Document the working or final content here." /></label>
+                <label>Caption<textarea className="contentCaptionField" value={contentForm.caption} onChange={(event) => setContentForm({ ...contentForm, caption: event.target.value })} placeholder="Exact final text that will publish with the post." /></label>
+                <label>Post image
+                  <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setCreativeFile(event.target.files?.[0] || null)} />
+                  <small>{creativeFile ? `${creativeFile.name} is ready to upload.` : contentForm.creative_asset_path ? `Stored asset: ${contentForm.creative_asset_path}` : "Upload the final pre-publication creative. Required for Bubbles n Salt posts owned by C-3PO."}</small>
+                </label>
                 <div className="formPair">
                   <label>Property
                     <select value={contentForm.property_id} onChange={(event) => {
@@ -1132,9 +1621,9 @@ export function CommandCenter() {
                 </div>
                 <label>Publish date and time<input type="datetime-local" value={contentForm.publish_at} onChange={(event) => setContentForm({ ...contentForm, publish_at: event.target.value })} /></label>
                 <label>Final published URL<input type="url" value={contentForm.final_url} onChange={(event) => setContentForm({ ...contentForm, final_url: event.target.value })} placeholder="https://…" /></label>
-                <label>Publication screenshot
+                <label>Creative / publication image
                   <input type="file" accept="image/jpeg,image/png,image/webp" onChange={(event) => setEvidenceFile(event.target.files?.[0] || null)} />
-                  <small>{selectedContent?.screenshot_path ? "Screenshot evidence is already stored. Select a new file only to replace the recorded path." : "Required when an Instagram item is marked published. Stored privately in Supabase."}</small>
+                  <small>{selectedContent?.screenshot_path ? "The original image is securely stored. Select a new file only to replace it." : "Upload the highest-quality final image. It stays private and becomes downloadable from the content preview."}</small>
                 </label>
                 <label>Failure or blocker detail<textarea value={contentForm.failure_message} onChange={(event) => setContentForm({ ...contentForm, failure_message: event.target.value })} placeholder="Required when status is Failed." /></label>
                 {selectedContent && (
@@ -1204,6 +1693,26 @@ export function CommandCenter() {
               </div>
             )}
           </aside>
+        </div>
+      )}
+      {rejectingContent && (
+        <div className="contentRejectionShade" onMouseDown={(event) => {
+          if (event.target === event.currentTarget && !reviewSaving) {
+            setRejectingContent(null);
+            setRejectionReason("");
+            setError("");
+          }
+        }}>
+          <section className="contentRejectionDialog" role="dialog" aria-modal="true" aria-labelledby="content-rejection-title" aria-describedby="content-rejection-help">
+            <form onSubmit={(event) => { event.preventDefault(); void reviewContent(rejectingContent, "changes_requested", rejectionReason); }}>
+              <span className="liveLabel"><i />Return for revision</span>
+              <h2 id="content-rejection-title">Why are you rejecting this post?</h2>
+              <p id="content-rejection-help">Be specific. This feedback becomes permanent review history for Lupe and {agentMap.get(String(rejectingContent.owner_agent_id)) || "the content owner"}, so they can revise the post without repeating the mistake.</p>
+              <label>Rejection reason<textarea autoFocus required value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="What needs to change, and what should the agents remember next time?" /></label>
+              {error && <p className="contentRejectionError" role="alert">{error}</p>}
+              <footer><button type="button" className="ghostBtn" disabled={reviewSaving} onClick={() => { setRejectingContent(null); setRejectionReason(""); setError(""); }}>Cancel</button><button type="submit" className="liveBtn" disabled={reviewSaving || !rejectionReason.trim()}>{reviewSaving ? "Saving…" : "Reject post"}</button></footer>
+            </form>
+          </section>
         </div>
       )}
     </div>
