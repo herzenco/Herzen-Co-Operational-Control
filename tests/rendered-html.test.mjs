@@ -75,6 +75,8 @@ test("recovery uses Supabase PKCE callback and requires active OCC membership", 
   ]);
   assert.match(recoverRoute, /resetPasswordForEmail/);
   assert.match(recoverRoute, /\/auth\/callback/);
+  assert.match(recoverRoute, /x-forwarded-host/);
+  assert.match(recoverRoute, /https:\/\/operations\.herzenco\.co/);
   assert.match(callbackRoute, /exchangeCodeForSession/);
   assert.match(updateRoute, /operations_members/);
   assert.match(updateRoute, /password\.length < 12/);
