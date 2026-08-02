@@ -18,6 +18,7 @@ type Viewer = {
 type Overview = {
   viewer: Viewer;
   agents: RecordValue[];
+  profiles: RecordValue[];
   projects: RecordValue[];
   tasks: RecordValue[];
   counts: {
@@ -32,7 +33,7 @@ type Overview = {
 type TaskForm = {
   title: string;
   description: string;
-  owner_agent_id: string;
+  assignee: string;
   project_id: string;
   priority: string;
   due_at: string;
@@ -66,7 +67,7 @@ type ContentUtilityStatus = { contentId: string; message: string; kind: "success
 const EMPTY_FORM: TaskForm = {
   title: "",
   description: "",
-  owner_agent_id: "",
+  assignee: "",
   project_id: "",
   priority: "medium",
   due_at: "",
@@ -472,7 +473,8 @@ export function CommandCenter() {
         priority: form.priority,
         definition_of_done: form.definition_of_done.trim(),
       };
-      if (form.owner_agent_id) payload.owner_agent_id = form.owner_agent_id;
+      if (form.assignee.startsWith("agent:")) payload.owner_agent_id = form.assignee.slice(6);
+      if (form.assignee.startsWith("human:")) payload.assigned_user_id = form.assignee.slice(6);
       if (form.project_id) payload.project_id = form.project_id;
       if (form.due_at) payload.due_at = new Date(form.due_at).toISOString();
       await request("/api/v1/tasks", { method: "POST", body: JSON.stringify(payload) });
@@ -592,6 +594,7 @@ export function CommandCenter() {
   }), [overview]);
   const projects = useMemo(() => overview?.projects || [], [overview]);
   const tasks = useMemo(() => overview?.tasks || [], [overview]);
+  const profiles = useMemo(() => overview?.profiles || [], [overview]);
   const agentMap = useMemo(
     () => new Map(agents.map((agent) => [String(agent.id), text(agent.name || agent.code)])),
     [agents],
@@ -600,6 +603,12 @@ export function CommandCenter() {
     () => new Map(projects.map((project) => [String(project.id), text(project.name || project.slug)])),
     [projects],
   );
+  const profileMap = useMemo(
+    () => new Map(profiles.map((profile) => [String(profile.user_id), text(profile.display_name)])),
+    [profiles],
+  );
+  const taskAssigneeName = (task: RecordValue) =>
+    profileMap.get(String(task.assigned_user_id)) || agentMap.get(String(task.owner_agent_id)) || "Unassigned";
   const latestUpdate = useMemo(() => {
     const map = new Map<string, RecordValue>();
     [...updates]
@@ -614,7 +623,9 @@ export function CommandCenter() {
   const visibleTasks = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return tasks.filter((task) => {
-      const laneMatch = lane === "all" || String(task.owner_agent_id) === lane;
+      const laneMatch = lane === "all"
+        || String(task.owner_agent_id) === lane
+        || `human:${String(task.assigned_user_id)}` === lane;
       const searchMatch = !needle || JSON.stringify(task).toLowerCase().includes(needle);
       return laneMatch && searchMatch;
     });
@@ -1008,7 +1019,7 @@ export function CommandCenter() {
             <div className="miniKanbanGrid">
               {STATUS_COLUMNS.map((column) => {
                 const items = tasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
-                return <div key={column.id}><header><span>{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>{items.slice(0, 2).map((task) => <button key={String(task.id)} onClick={() => setView("kanban")}><b>{text(task.title)}</b><small>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</small></button>)}{!items.length && <p>Clear</p>}</div>;
+                return <div key={column.id}><header><span>{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>{items.slice(0, 2).map((task) => <button key={String(task.id)} onClick={() => setView("kanban")}><b>{text(task.title)}</b><small>{taskAssigneeName(task)}</small></button>)}{!items.length && <p>Clear</p>}</div>;
               })}
             </div>
           </section>
@@ -1062,7 +1073,7 @@ export function CommandCenter() {
             <section className="deckPanel">
               <header className="panelHead"><div><span className="dim">Today</span><h2>Due before close</h2></div><small>{dueToday.length}</small></header>
               {dueToday.slice(0, 5).map((task) => (
-                <div className="dueRow" key={String(task.id)}><i /><span><b>{text(task.title)}</b><small>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</small></span></div>
+                <div className="dueRow" key={String(task.id)}><i /><span><b>{text(task.title)}</b><small>{taskAssigneeName(task)}</small></span></div>
               ))}
               {!dueToday.length && <p className="opsEmpty">Nothing due today.</p>}
             </section>
@@ -1081,7 +1092,7 @@ export function CommandCenter() {
           <div className="ledgerRow" key={String(task.id)}>
             <button className={`squareCheck ${taskStatus(task) === "done" ? "done" : ""}`} onClick={() => void moveTask(task, taskStatus(task) === "done" ? "in_progress" : "done")} aria-label="Toggle completion"><i /></button>
             <span className="instruction"><b className={taskStatus(task) === "done" ? "struck" : ""}>{text(task.title)}</b><small>{text(task.description, "No context documented")}</small></span>
-            <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</button>
+            <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{taskAssigneeName(task)}</button>
             <span className={text(task.priority) === "urgent" ? "urgent" : ""}>{text(task.priority, "medium")}</span>
             <span className={`statusPill s${taskStatus(task).replace("_", "")}`}><i />{statusLabel(taskStatus(task))}</span>
             <span>{dateLabel(task.due_at)}</span>
@@ -1109,7 +1120,7 @@ export function CommandCenter() {
                     <header><span>{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
                     <h3>{text(task.title)}</h3>
                     <p>{text(task.description, "No context documented.")}</p>
-                    <footer><span><span className="agentMark">{initials(agentMap.get(String(task.owner_agent_id)))}</span>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</span>
+                    <footer><span><span className="agentMark">{initials(taskAssigneeName(task))}</span>{taskAssigneeName(task)}</span>
                       {column.id !== "done" && <button onClick={() => void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done")}>Advance →</button>}
                     </footer>
                   </article>
@@ -1456,7 +1467,7 @@ export function CommandCenter() {
             <button className="outlineBtn" onClick={() => setDrawer("brief")}>Daily brief</button>
             <button className="liveBtn" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New instruction</button>
           </div>}
-          {view !== "workflows" && <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}</div>}
+          {view !== "workflows" && <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}{["command", "kanban", "list"].includes(view) && profiles.map((profile) => <button key={String(profile.user_id)} className={lane === `human:${String(profile.user_id)}` ? "active" : ""} onClick={() => setLane(`human:${String(profile.user_id)}`)}>{text(profile.display_name)}</button>)}</div>}
         </header>
 
         <section className={`deckContent ${view === "workflows" ? "workflowDeckContent" : ""}`}>
@@ -1495,7 +1506,7 @@ export function CommandCenter() {
                 <span className="liveLabel"><i />New instruction</span><h2>Put direction into motion.</h2><p>Assign the lane, context, due date, and definition of done. Lupe and the agent roster will work from this record.</p>
                 <label>Instruction<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="What needs to happen?" /></label>
                 <label>Context<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-                <div className="formPair"><label>Agent<select value={form.owner_agent_id} onChange={(event) => setForm({ ...form, owner_agent_id: event.target.value })}><option value="">Unassigned</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
+                <div className="formPair"><label>Assignee<select value={form.assignee} onChange={(event) => setForm({ ...form, assignee: event.target.value })}><option value="">Unassigned</option><optgroup label="People">{profiles.map((profile) => <option key={String(profile.user_id)} value={`human:${String(profile.user_id)}`}>{text(profile.display_name)}</option>)}</optgroup><optgroup label="Agents">{agents.map((agent) => <option key={String(agent.id)} value={`agent:${String(agent.id)}`}>{text(agent.name || agent.code)}</option>)}</optgroup></select></label>
                   <label>Project<select value={form.project_id} onChange={(event) => setForm({ ...form, project_id: event.target.value })}><option value="">General</option>{projects.map((project) => <option key={String(project.id)} value={String(project.id)}>{text(project.name || project.slug)}</option>)}</select></label></div>
                 <div className="formPair"><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Due<input type="datetime-local" value={form.due_at} onChange={(event) => setForm({ ...form, due_at: event.target.value })} /></label></div>
                 <label>Definition of done<textarea value={form.definition_of_done} onChange={(event) => setForm({ ...form, definition_of_done: event.target.value })} /></label>

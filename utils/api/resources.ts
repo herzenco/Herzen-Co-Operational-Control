@@ -1,5 +1,6 @@
 export type ResourceName =
   | "agents"
+  | "operations-profiles"
   | "projects"
   | "tasks"
   | "work-logs"
@@ -29,6 +30,14 @@ type ResourceConfig = {
 };
 
 export const resources: Record<ResourceName, ResourceConfig> = {
+  "operations-profiles": {
+    table: "operations_profiles",
+    mutable: false,
+    createFields: [],
+    updateFields: [],
+    filters: ["user_id", "active"],
+    defaultOrder: "display_name",
+  },
   agents: {
     table: "agents",
     mutable: true,
@@ -48,9 +57,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   tasks: {
     table: "tasks",
     mutable: true,
-    createFields: ["title", "description", "project_id", "owner_agent_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata"],
-    updateFields: ["title", "description", "project_id", "owner_agent_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata", "completed_at"],
-    filters: ["project_id", "owner_agent_id", "status", "priority"],
+    createFields: ["title", "description", "project_id", "owner_agent_id", "assigned_user_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata"],
+    updateFields: ["title", "description", "project_id", "owner_agent_id", "assigned_user_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata", "completed_at"],
+    filters: ["project_id", "owner_agent_id", "assigned_user_id", "status", "priority"],
     defaultOrder: "created_at",
   },
   "work-logs": {
