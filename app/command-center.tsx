@@ -7,7 +7,7 @@ import { WorkflowDesigner } from "./workflows/workflow-designer";
 import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
 import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
 
-type View = "command" | "kanban" | "list" | "worklogs" | "content" | "leads" | "approvals" | "workflows";
+type View = "command" | "kanban" | "list" | "worklogs" | "content" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
 
 type Viewer = {
@@ -118,6 +118,7 @@ const VIEWS: Array<{ id: View; label: string }> = [
   { id: "list", label: "List" },
   { id: "worklogs", label: "Work Logs" },
   { id: "content", label: "Content" },
+  { id: "agentops", label: "Agent Ops" },
   { id: "leads", label: "Leads" },
   { id: "approvals", label: "Approvals" },
   { id: "workflows", label: "Workflows" },
@@ -198,12 +199,22 @@ export function CommandCenter() {
   const [contentChannels, setContentChannels] = useState<RecordValue[]>([]);
   const [contentTypes, setContentTypes] = useState<RecordValue[]>([]);
   const [contentHistory, setContentHistory] = useState<RecordValue[]>([]);
+  const [agentWorkItems, setAgentWorkItems] = useState<RecordValue[]>([]);
+  const [workDependencies, setWorkDependencies] = useState<RecordValue[]>([]);
+  const [contentFeedback, setContentFeedback] = useState<RecordValue[]>([]);
+  const [socialQueue, setSocialQueue] = useState<RecordValue[]>([]);
   const [view, setView] = useState<View>("command");
   const [lane, setLane] = useState("all");
   const [query, setQuery] = useState("");
   const [contentPlatform, setContentPlatform] = useState("all");
   const [contentAccount, setContentAccount] = useState("all");
   const [contentType, setContentType] = useState("all");
+  const [opsAgent, setOpsAgent] = useState("all");
+  const [opsProperty, setOpsProperty] = useState("all");
+  const [opsPlatform, setOpsPlatform] = useState("all");
+  const [opsStatus, setOpsStatus] = useState("all");
+  const [opsSignal, setOpsSignal] = useState("all");
+  const [opsPublishDate, setOpsPublishDate] = useState("");
   const [todayLabel, setTodayLabel] = useState("Today");
   const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
@@ -325,6 +336,19 @@ export function CommandCenter() {
     return payload;
   }
 
+  async function downloadDeliverable(item: RecordValue) {
+    try {
+      setError("");
+      const payload = await request(`/api/v1/content-items/${item.id}/deliverable`);
+      const blob = new Blob([JSON.stringify(payload.data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      triggerFileDownload(url, `occ-${String(item.title || item.id).toLowerCase().replace(/[^a-z0-9]+/g, "-")}.json`);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "The package is blocked from delivery.");
+    }
+  }
+
   async function refreshAll(accessToken: string) {
     try {
       setError("");
@@ -341,6 +365,10 @@ export function CommandCenter() {
         historyResponse,
         approvalActivityResponse,
         leadsResponse,
+        agentWorkResponse,
+        workDependencyResponse,
+        feedbackResponse,
+        socialQueueResponse,
       ] = await Promise.all([
         fetch("/api/v1/overview", { headers }),
         fetch("/api/v1/approvals?limit=200&offset=0", { headers }),
@@ -353,6 +381,10 @@ export function CommandCenter() {
         fetch("/api/v1/content-status-history?limit=500&offset=0", { headers }),
         fetch("/api/v1/activity?entity_type=approvals&limit=500&offset=0", { headers }),
         fetch("/api/v1/leads?limit=500&offset=0", { headers }),
+        fetch("/api/v1/agent-work-items?limit=500&offset=0", { headers }),
+        fetch("/api/v1/agent-work-dependencies?limit=500&offset=0", { headers }),
+        fetch("/api/v1/content-feedback?limit=500&offset=0", { headers }),
+        fetch("/api/v1/social-operations-queue?limit=500&offset=0", { headers }),
       ]);
       const [
         overviewPayload,
@@ -366,6 +398,10 @@ export function CommandCenter() {
         historyPayload,
         approvalActivityPayload,
         leadsPayload,
+        agentWorkPayload,
+        workDependencyPayload,
+        feedbackPayload,
+        socialQueuePayload,
       ] = await Promise.all([
         overviewResponse.json(),
         approvalsResponse.json(),
@@ -378,6 +414,10 @@ export function CommandCenter() {
         historyResponse.json(),
         approvalActivityResponse.json(),
         leadsResponse.json(),
+        agentWorkResponse.json(),
+        workDependencyResponse.json(),
+        feedbackResponse.json(),
+        socialQueueResponse.json(),
       ]);
       if (!overviewResponse.ok) throw new Error(overviewPayload?.error?.message || "Could not load operations.");
       const contentResponses = [
@@ -409,6 +449,10 @@ export function CommandCenter() {
       setContentHistory(historyPayload.data.items);
       setApprovalActivity(approvalActivityResponse.ok ? approvalActivityPayload.data.items : []);
       setLeads(leadsResponse.ok ? leadsPayload.data.items : []);
+      setAgentWorkItems(agentWorkResponse.ok ? agentWorkPayload.data.items : []);
+      setWorkDependencies(workDependencyResponse.ok ? workDependencyPayload.data.items : []);
+      setContentFeedback(feedbackResponse.ok ? feedbackPayload.data.items : []);
+      setSocialQueue(socialQueueResponse.ok ? socialQueuePayload.data.items : []);
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load operations.");
     }
@@ -1096,6 +1140,59 @@ export function CommandCenter() {
     );
   }
 
+  function renderAgentOps() {
+    const agentById = new Map(agents.map((agent) => [String(agent.id), text(agent.name || agent.code)]));
+    const propertyById = new Map(contentProperties.map((property) => [String(property.id), text(property.name)]));
+    const queueById = new Map(socialQueue.map((item) => [String(item.id), item]));
+    const workById = new Map(agentWorkItems.map((item) => [String(item.id), item]));
+    const blockedWork = new Set(workDependencies.filter((dependency) => {
+      if (dependency.required !== true) return false;
+      const upstream = workById.get(String(dependency.upstream_work_item_id));
+      return upstream && !["final", "delivered"].includes(text(upstream.status));
+    }).map((dependency) => String(dependency.downstream_work_item_id)));
+    const filtered = contentItems.filter((item) => {
+      const queue = queueById.get(String(item.id));
+      return (opsAgent === "all" || String(item.owner_agent_id) === opsAgent)
+        && (opsProperty === "all" || String(item.property_id) === opsProperty)
+        && (opsPlatform === "all" || String(queue?.platform) === opsPlatform)
+        && (opsStatus === "all" || String(item.status) === opsStatus)
+        && (!opsPublishDate || String(item.publish_at || "").slice(0, 10) === opsPublishDate)
+        && (opsSignal === "all"
+          || (opsSignal === "blocked" && agentWorkItems.some((work) => String(work.content_item_id) === String(item.id) && blockedWork.has(String(work.id))))
+          || (opsSignal === "feedback" && queue?.has_unresolved_feedback === true)
+          || (opsSignal === "ready" && queue?.ready_to_deliver === true));
+    }).sort((a, b) => String(a.publish_at || "9999").localeCompare(String(b.publish_at || "9999")));
+
+    return <div className="agentOpsDeck">
+      <section className="deckPanel opsControlPanel">
+        <header className="panelHead"><div><span>Canonical social operations</span><h2>Agent handoffs and delivery queue</h2></div><small>{agentWorkItems.length} artifacts · {contentFeedback.filter((item) => item.required === true && ["received", "blocked"].includes(text(item.status))).length} unresolved feedback</small></header>
+        <div className="opsViewFilters">
+          <label>Agent<select value={opsAgent} onChange={(event) => setOpsAgent(event.target.value)}><option value="all">All agents</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
+          <label>Brand<select value={opsProperty} onChange={(event) => setOpsProperty(event.target.value)}><option value="all">All brands</option>{contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)}>{text(property.name)}</option>)}</select></label>
+          <label>Platform<select value={opsPlatform} onChange={(event) => setOpsPlatform(event.target.value)}><option value="all">All platforms</option>{[...new Set(socialQueue.map((item) => text(item.platform)).filter((item) => item !== "—"))].map((platform) => <option key={platform}>{platform}</option>)}</select></label>
+          <label>Status<select value={opsStatus} onChange={(event) => setOpsStatus(event.target.value)}><option value="all">All statuses</option>{Object.keys(CONTENT_STATUS_LABELS).map((status) => <option key={status} value={status}>{CONTENT_STATUS_LABELS[status]}</option>)}</select></label>
+          <label>Signal<select value={opsSignal} onChange={(event) => setOpsSignal(event.target.value)}><option value="all">All records</option><option value="blocked">Dependency blocked</option><option value="feedback">Feedback unresolved</option><option value="ready">Ready to deliver</option></select></label>
+          <label>Publish date<input type="date" value={opsPublishDate} onChange={(event) => setOpsPublishDate(event.target.value)} /></label>
+        </div>
+      </section>
+      <section className="opsPackageGrid">
+        {filtered.map((item) => {
+          const queue = queueById.get(String(item.id));
+          const work = agentWorkItems.filter((artifact) => String(artifact.content_item_id) === String(item.id) || String(artifact.campaign_id) === String(item.id));
+          const feedback = contentFeedback.filter((entry) => String(entry.content_item_id) === String(item.id));
+          const dependencyBlocked = work.some((artifact) => blockedWork.has(String(artifact.id)));
+          return <article className="deckPanel opsPackageCard" key={String(item.id)}>
+            <header><div><span>{propertyById.get(String(item.property_id)) || "Unknown brand"} · {text(queue?.platform)}</span><h3>{text(item.title)}</h3></div><b className={queue?.ready_to_deliver === true ? "readySignal" : "blockedSignal"}>{queue?.ready_to_deliver === true ? "Ready" : "Gated"}</b></header>
+            <p>{dateLabel(item.publish_at)} · {CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))} · {agentById.get(String(item.owner_agent_id)) || "Unassigned"}</p>
+            <div className="handoffChain">{work.length ? work.map((artifact, index) => <span key={String(artifact.id)} className={blockedWork.has(String(artifact.id)) ? "blocked" : ""}>{index > 0 && <i>→</i>}<b>{agentById.get(String(artifact.agent_id)) || "Agent"}</b><small>{text(artifact.work_item_type)} · {text(artifact.status)}</small></span>) : <em>No agent artifacts linked</em>}</div>
+            <footer><span>{dependencyBlocked ? "Dependency blocked" : feedback.some((entry) => entry.required === true && ["received", "blocked"].includes(text(entry.status))) ? "Required feedback unresolved" : `${work.length} linked artifacts`}</span><button className="outlineBtn" disabled={queue?.ready_to_deliver !== true} onClick={() => void downloadDeliverable(item)}>Download final package</button></footer>
+          </article>;
+        })}
+        {!filtered.length && <p className="opsEmpty">No packages match this operations view.</p>}
+      </section>
+    </div>;
+  }
+
   function renderContent() {
     const platforms = [...new Set(contentChannels.map((channel) => text(channel.platform)).filter(Boolean))].sort();
     const accounts = [...new Set(contentChannels.map((channel) => text(channel.account_name)).filter(Boolean))].sort();
@@ -1369,6 +1466,7 @@ export function CommandCenter() {
           {view === "kanban" && renderKanban()}
           {view === "worklogs" && renderWorkLogs()}
           {view === "content" && renderContent()}
+          {view === "agentops" && renderAgentOps()}
           {view === "leads" && renderLeads()}
           {view === "approvals" && renderApprovals()}
           {view === "workflows" && session?.access_token && <WorkflowDesigner accessToken={session.access_token} />}

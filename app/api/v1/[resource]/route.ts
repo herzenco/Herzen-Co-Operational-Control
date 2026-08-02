@@ -39,7 +39,10 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!resource) return fail(404, "unknown_resource", "That API resource does not exist.");
   if (!resource.mutable) return fail(405, "read_only_resource", "This resource is read-only.");
 
-  const context = await requireMember(request, { write: true });
+  const context = await requireMember(request, {
+    write: true,
+    allowAgentWrite: ["content-items", "content-assets", "agent-work-items", "agent-work-dependencies", "content-feedback"].includes(resourceName),
+  });
   if (isApiError(context)) return context;
 
   const body = await readJson(request);
