@@ -23,7 +23,7 @@ by Git. Production credentials should be placed in Lupe's secret manager.
 Local:
 
 ```text
-http://localhost:3000/api/v1
+http://localhost:4000/api/v1
 ```
 
 Production:
@@ -31,6 +31,13 @@ Production:
 ```text
 https://operations.herzenco.co/api/v1
 ```
+
+Live behavior verified on 2026-07-31:
+
+- `GET /api/v1` without a bearer token returns `401 unauthorized`.
+- The production response message is:
+  `Send a Supabase access token as Authorization: Bearer <token>.`
+- `https://operations.herzenco.co/login` is publicly reachable.
 
 ## Authenticate
 
@@ -89,6 +96,11 @@ Content-Type: application/json
 | Work logs | `/api/v1/work-logs` | Document progress, decisions, blockers, evidence, and deliverables |
 | Daily updates | `/api/v1/daily-updates` | Submit and revise each agent's daily report |
 | Approvals | `/api/v1/approvals` | Package, approve, decline, or request changes |
+| Content properties | `/api/v1/content-properties` | Manage brands and pause or activate their content operation |
+| Content channels | `/api/v1/content-channels` | Manage platform accounts and their publishing mode |
+| Content types | `/api/v1/content-types` | Propose and activate the formats recommended by K2 |
+| Content items | `/api/v1/content-items` | Create, document, approve, schedule, publish, and verify content |
+| Content status history | `/api/v1/content-status-history` | Read the append-only content workflow history |
 | Activity | `/api/v1/activity` | Read the immutable audit trail |
 
 Every mutable resource supports:
@@ -119,8 +131,158 @@ Supported filters:
 - Work logs: `task_id`, `agent_id`, `entry_type`
 - Daily updates: `agent_id`, `update_date`, `health`
 - Approvals: `task_id`, `project_id`, `requested_by_agent_id`,
-  `reviewer_agent_id`, `status`
+  `content_item_id`, `reviewer_agent_id`, `status`
+- Content properties: `slug`, `status`
+- Content channels: `property_id`, `platform`, `status`, `publishing_mode`
+- Content types: `slug`, `status`, `recommended_by_agent_id`
+- Content items: `property_id`, `channel_id`, `content_type_id`,
+  `owner_agent_id`, `distribution_mode`, `status`, `legacy_content_item_id`,
+  `source_system`
+- Content status history: `content_item_id`, `from_status`, `to_status`,
+  `changed_by`
 - Activity: `actor_user_id`, `action`, `entity_type`, `entity_id`
+
+## Content operating model
+
+The Operations Control Center is the intended system of record for content
+operations. Default to OCC-native workflow as the clean-slate operating path.
+Legacy bridge fields exist only for optional reconciliation of older records
+that still need to be referenced here.
+
+Supported bridge fields:
+
+- `legacy_content_item_id`
+- `legacy_review_url`
+- `source_system`
+
+Use `source_system = legacy_content_engine` only when importing or reconciling
+older Content Engine records into the Control Center.
+
+The initial properties and channels are:
+
+- Herzen Co.: Instagram (`manual`), LinkedIn (`lupe_automated`), and Website
+  (`occ_automated`).
+- Humanismo Evolutivo: Website, paused.
+- Bubbles n Salt: Instagram (`manual`).
+
+Skydeo is not a content property.
+
+Every content item uses this day-one governance:
+
+1. K2 supplies research and format recommendations.
+2. C-3PO creates organic social and website content, or Rex creates paid media.
+3. Lupe reviews and assembles the approval package.
+4. Tito must approve every item.
+5. The approved item is scheduled and handed to the configured publisher.
+6. Lupe records the final URL, result, and required evidence.
+
+The database rejects `approved`, `scheduled`, `publishing`, and `published`
+states until an approval decision has recorded both `approved_by` and
+`approved_at`. Instagram also requires a final URL and screenshot path before
+it can be marked `published`.
+
+Content status values:
+
+```text
+idea
+research_ready
+drafting
+ready_for_lupe
+awaiting_tito
+revision_requested
+approved
+scheduled
+publishing
+published
+blocked
+failed
+cancelled
+```
+
+Creative fields are `caption` and `creative_asset_path`. The latter is a private object path in `content-creative-assets`, never a pasted public URL. Reads and successful writes return a derived `creative_attachment` object with `bucket`, `path`, and `attached: true`, or `null` when absent. Clients use that stable shape to request a temporary signed preview or download URL. Publication proof remains separate in `screenshot_path` and `content-publication-evidence`.
+
+### Create a content item
+
+```http
+POST /api/v1/content-items
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "title": "Founder operating note",
+  "brief": "Turn K2's research into a concise LinkedIn post.",
+  "caption": "The final publishing caption.",
+  "creative_asset_path": "<user uuid>/content-record/image.jpg",
+  "property_id": "<Herzen Co. property uuid>",
+  "channel_id": "<Herzen Co. LinkedIn channel uuid>",
+  "owner_agent_id": "<C-3PO uuid>",
+  "research_owner_agent_id": "<K2 uuid>",
+  "distribution_mode": "organic",
+  "status": "idea",
+  "source_system": "operations_control_center"
+}
+```
+
+### Send content to Tito
+
+Lupe first creates an approval linked through `content_item_id`, then updates
+the content item to `awaiting_tito` with the returned `approval_id`.
+
+Approving the linked approval automatically records Tito as `approved_by`,
+records `approved_at`, and moves the item to `approved`. Requesting changes
+moves it to `revision_requested`. A `changes_requested` or `declined` decision
+must include a non-empty `decision_note`; the API rejects the decision without
+one. Send `schedule_content: true` with an approved decision to move a dated
+item directly to `scheduled`.
+
+Every approval change is also captured in immutable `activity_log` history.
+OCC uses those snapshots for the Content page's Rejected section so Lupe and
+the assigned content owner can review old feedback even after a revised post is
+approved later.
+
+### Record publication
+
+LinkedIn publishing occurs through Lupe's external automation. The Control
+Center tracks its external job/status and final URL. Website publishing is
+OCC-managed. Instagram starts as manual.
+
+```http
+PATCH /api/v1/content-items/<content uuid>
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "status": "published",
+  "final_url": "https://www.instagram.com/p/example/",
+  "screenshot_path": "<private Supabase Storage object path>",
+  "published_at": "2026-07-30T21:00:00Z"
+}
+```
+
+Screenshots belong in the private `content-publication-evidence` bucket.
+Authenticated owners/operators may upload JPEG, PNG, or WebP files up to 10 MB
+under a folder named with their Supabase user ID.
+
+### Reconcile a legacy Content Engine item when explicitly needed
+
+```http
+POST /api/v1/content-items
+Authorization: Bearer <access_token>
+Content-Type: application/json
+
+{
+  "title": "AI Speeds Up Clear Teams, Not Confused Ones",
+  "property_id": "<Herzen Co. property uuid>",
+  "channel_id": "<Herzen Co. Website channel uuid>",
+  "owner_agent_id": "<C-3PO uuid>",
+  "distribution_mode": "organic",
+  "status": "scheduled",
+  "source_system": "legacy_content_engine",
+  "legacy_content_item_id": "41e91159-2284-4e17-aead-10c8c3adafc9",
+  "legacy_review_url": "https://content.herzenco.co/review/41e91159-2284-4e17-aead-10c8c3adafc9",
+  "publish_at": "2026-07-31T14:00:00Z"
+}
+```
 
 ## Common operations
 
@@ -242,6 +404,56 @@ Content-Type: application/json
 When an approval is decided, the API automatically records `decided_by` and
 `decided_at`.
 
+## Workflow definitions
+
+Workflows are validated definitions only. These endpoints do not execute,
+schedule, test, or simulate them.
+
+```text
+GET    /api/v1/workflows?status=draft&owner_id=<uuid>&limit=100&offset=0
+POST   /api/v1/workflows
+GET    /api/v1/workflows/:id
+PATCH  /api/v1/workflows/:id
+DELETE /api/v1/workflows/:id
+GET    /api/v1/workflows/:id/versions?limit=100&offset=0
+POST   /api/v1/workflows/:id/versions/:version/restore
+```
+
+Create and update accept either the raw workflow JSON or a wrapped body:
+
+```json
+{
+  "definition": {
+    "id": "62be31f8-68e5-4f97-b171-a1b30c436510",
+    "name": "Daily content readiness review",
+    "description": "Prepare content for human review.",
+    "version": 1,
+    "status": "draft",
+    "trigger": {},
+    "nodes": [],
+    "edges": [],
+    "variables": {},
+    "createdAt": "2026-07-31T13:00:00.000Z",
+    "updatedAt": "2026-07-31T13:00:00.000Z",
+    "createdBy": "lupe"
+  }
+}
+```
+
+The complete definition is checked by the same Zod schema and graph validator
+used by the editor. Invalid definitions return `422 workflow_invalid` with the
+structured validation errors. Every successful create or update writes an
+immutable version snapshot. Restoring an older snapshot creates a new current
+version; it never rewrites or deletes history.
+
+JSON import and export preserve the submitted workflow definition losslessly.
+Credential fields contain secret names only and exported definitions never
+contain credential values.
+
+Active members can read workflow definitions and versions. Following the
+existing OCC role model, only owners and operators can create, update, restore,
+duplicate, or delete workflows.
+
 ## Status values
 
 Tasks:
@@ -278,6 +490,12 @@ Approvals:
 
 ```text
 pending | approved | changes_requested | declined | withdrawn
+```
+
+Workflows:
+
+```text
+draft | active | paused | archived
 ```
 
 Work-log types:

@@ -1,4 +1,57 @@
-# vinext-starter
+# Herzen Co. Operations Control Center
+
+Start with the project documentation:
+
+- [`docs/LUPE_HANDOFF_AND_ROADMAP.md`](docs/LUPE_HANDOFF_AND_ROADMAP.md) — what
+  is implemented, how Lupe should operate it, current boundaries, and what to
+  build next.
+- [`docs/LUPE_OPERATIONS_API.md`](docs/LUPE_OPERATIONS_API.md) — authentication,
+  endpoints, resources, payloads, and API operating guidance.
+- [`docs/OPERATIONS_COMMAND_CENTER_PRODUCT_SPEC.md`](docs/OPERATIONS_COMMAND_CENTER_PRODUCT_SPEC.md) —
+  detailed product, workflow, interface, data, security, API, and delivery
+  specification for the Command Center.
+- [`Operations Control Center - Capabilities and Operating Guide.md`](Operations%20Control%20Center%20-%20Capabilities%20and%20Operating%20Guide.md) —
+  original product capabilities and operating vision.
+
+## Local development
+
+```bash
+npm install
+npm run dev -- --host 0.0.0.0 --port 4000
+```
+
+The authenticated application is available at `http://localhost:4000`.
+
+## Content operations helper scripts
+
+These scripts support Command Center content operations. The default direction
+is OCC-native, blank-slate workflow design. The legacy bridge exists only for
+cases where older records need to be reconciled into OCC.
+
+- `node scripts/import-legacy-content-state.mjs`
+  - Imports planned or scheduled items from
+    `/Users/tito/.openclaw/workspace/memory/herzenco-content-automation-state.json`
+    into OCC content records when legacy reconciliation is explicitly needed.
+- `node scripts/tomorrow-content-review-pack.mjs`
+  - Prints tomorrow's scheduled OCC content items in a review-pack format.
+
+Required environment for both scripts:
+
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `SUPABASE_SERVICE_ROLE_KEY`
+
+## Production API reality check
+
+The protected API is live at `https://operations.herzenco.co/api/v1`.
+
+- Unauthenticated `GET /api/v1` currently returns `401 unauthorized`.
+- The live response message is:
+  `Send a Supabase access token as Authorization: Bearer <token>.`
+- `https://operations.herzenco.co/login` is publicly reachable.
+- Protected API work still requires a live Supabase session from
+  `POST /api/v1/auth/token` or `POST /api/v1/auth/refresh`.
+
+## Runtime foundation
 
 A clean full-stack starter running on
 [vinext](https://github.com/cloudflare/vinext), with optional Cloudflare D1 and
