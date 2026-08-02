@@ -5,9 +5,10 @@ export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  const isLoginRoute =
-    request.nextUrl.pathname === "/login" ||
-    request.nextUrl.pathname === "/api/auth/login";
+  const isPublicAuthRoute = [
+    "/login", "/recover", "/reset-password", "/auth/callback",
+    "/api/auth/login", "/api/auth/recover", "/api/auth/update-password",
+  ].includes(request.nextUrl.pathname);
   const isOperationsApi =
     request.nextUrl.pathname === "/api/v1" ||
     request.nextUrl.pathname.startsWith("/api/v1/");
@@ -15,7 +16,7 @@ export async function updateSession(request: NextRequest) {
   // Allow local smoke tests and unauthenticated shells to render predictable
   // boundaries even when project secrets are not loaded.
   if (!supabaseUrl || !supabaseKey) {
-    if (!isLoginRoute && !isOperationsApi) {
+    if (!isPublicAuthRoute && !isOperationsApi) {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/login";
       loginUrl.search = "";
@@ -60,7 +61,7 @@ export async function updateSession(request: NextRequest) {
     return supabaseResponse;
   }
 
-  if (!isAuthenticated && !isLoginRoute) {
+  if (!isAuthenticated && !isPublicAuthRoute) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";
