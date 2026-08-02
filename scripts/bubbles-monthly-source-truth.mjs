@@ -26,6 +26,10 @@ export function validateMonthFiles(names, month, expectedDays) {
   return mapped;
 }
 
+export function storageObjectName(date, name) {
+  return `day-${date.slice(-2)}${extname(name).toLowerCase()}`;
+}
+
 function easternDate(value) {
   return new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit", timeZone: "America/New_York" }).format(new Date(value));
 }
@@ -55,29 +59,43 @@ async function main() {
   const supabase = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
   const { data: auth, error: authError } = await supabase.auth.signInWithPassword({ email, password });
   if (authError || !auth.user) throw authError || new Error("Could not authenticate.");
-  const [{ data: property, error: propertyError }, { data: channel, error: channelError }, { data: c3po, error: agentError }] = await Promise.all([
+  const [{ data: property, error: propertyError }, { data: c3po, error: agentError }] = await Promise.all([
     supabase.from("content_properties").select("id").eq("slug", "bubbles-n-salt").single(),
-    supabase.from("content_channels").select("id,property_id").ilike("platform", "instagram").eq("account_name", "Bubbles n Salt").single(),
     supabase.from("agents").select("id").ilike("code", "c-3po").single(),
   ]);
-  if (propertyError || channelError || agentError || !property || !channel || !c3po) throw propertyError || channelError || agentError || new Error("Bubbles configuration missing.");
+  if (propertyError || agentError || !property || !c3po) throw propertyError || agentError || new Error("Bubbles configuration missing.");
+  const { data: channel, error: channelError } = await supabase.from("content_channels").select("id,property_id").eq("property_id", property.id).ilike("platform", "instagram").eq("status", "active").single();
+  if (channelError || !channel) throw channelError || new Error("Active Bubbles Instagram channel missing.");
   const storagePrefix = `${auth.user.id}/bubbles-n-salt/${month}/source-of-truth`;
   const { data: folder, error: folderError } = await supabase.from("monthly_content_folders").upsert({ property_id: property.id, channel_id: channel.id, month_start: `${month}-01`, storage_bucket: "content-creative-assets", storage_prefix: storagePrefix, created_by_agent_id: c3po.id }, { onConflict: "property_id,channel_id,month_start" }).select("id").single();
   if (folderError || !folder) throw folderError || new Error("Could not register monthly folder.");
   const nextMonth = new Date(Date.UTC(year, monthNumber, 1)).toISOString().slice(0, 7);
-  const { data: items, error: itemsError } = await supabase.from("content_items").select("id,publish_at,source_asset_id,creative_asset_path").eq("property_id", property.id).eq("channel_id", channel.id).gte("publish_at", `${month}-01T00:00:00-04:00`).lt("publish_at", `${nextMonth}-01T00:00:00-04:00`);
+  const { data: items, error: itemsError } = await supabase.from("content_items").select("id,publish_at,source_asset_id,delivery_asset_id,creative_asset_path").eq("property_id", property.id).eq("channel_id", channel.id).gte("publish_at", `${month}-01T00:00:00-04:00`).lt("publish_at", `${nextMonth}-01T00:00:00-04:00`);
   if (itemsError) throw itemsError;
   const byDate = new Map((items || []).map((item) => [easternDate(item.publish_at), item]));
   if (byDate.size !== days) throw new Error(`Expected ${days} OCC items; found ${byDate.size}. No writes beyond the folder registration were made.`);
+  const { data: registeredAssets, error: registeredAssetsError } = await supabase.from("content_assets").select("id,content_item_id,asset_role,assigned_publish_date").eq("monthly_folder_id", folder.id).eq("is_current", true);
+  if (registeredAssetsError) throw registeredAssetsError;
+  const registeredByDate = new Map();
+  for (const asset of registeredAssets || []) {
+    const roles = registeredByDate.get(asset.assigned_publish_date) || {};
+    roles[asset.asset_role] = asset;
+    registeredByDate.set(asset.assigned_publish_date, roles);
+  }
 
   await mkdir(sourceFolder, { recursive: true });
   for (const [date, name] of files) {
     const item = byDate.get(date);
     if (!item) throw new Error(`No OCC item assigned to ${date}.`);
+    const registered = registeredByDate.get(date);
+    if (registered?.source?.id === item.source_asset_id && registered?.delivery?.id === item.delivery_asset_id) {
+      console.log(`SKIP ${date}: already remapped and verified in OCC.`);
+      continue;
+    }
     const input = join(borderedFolder, name);
     const output = join(sourceFolder, name);
     await copyFile(input, output);
-    const objectPath = `${storagePrefix}/${name}`;
+    const objectPath = `${storagePrefix}/${storageObjectName(date, name)}`;
     const bytes = await readFile(output);
     const { error: uploadError } = await supabase.storage.from("content-creative-assets").upload(objectPath, bytes, { contentType: extname(name).toLowerCase() === ".png" ? "image/png" : "image/jpeg", upsert: false });
     if (uploadError && !/already exists|duplicate/i.test(uploadError.message)) throw uploadError;
@@ -93,6 +111,8 @@ async function main() {
     const { error: auditError } = await supabase.from("asset_remap_audit").insert({ content_item_id: item.id, publish_date: date, prior_source_asset_id: item.source_asset_id, new_source_asset_id: asset.id, prior_creative_asset_path: item.creative_asset_path, new_creative_asset_path: objectPath, reason: `${month} Bubbles remediation: remapped to date-matched bordered monthly export.` });
     if (auditError) throw auditError;
   }
+  const { count: auditCount, error: auditCountError } = await supabase.from("asset_remap_audit").select("id", { count: "exact", head: true }).gte("publish_date", `${month}-01`).lt("publish_date", `${nextMonth}-01`);
+  if (auditCountError || auditCount !== days) throw auditCountError || new Error(`Expected ${days} remap audit rows; found ${auditCount}.`);
   console.log(`Verified and remapped ${files.size}/${days} Bubbles items with an audit row per date. Prior source records are now marked removable_after_copy.`);
 }
 
