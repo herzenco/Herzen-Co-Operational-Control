@@ -56,6 +56,21 @@ node --env-file=.env.local scripts/backfill-bubbles-creatives.mjs --apply
 
 The first command is a dry run. `--apply` uploads missing manifest-selected originals to deterministic authenticated-user paths; existing Storage objects are reused without replacement. It copies captions into the first-class field, stores `creative_asset_path`, changes `metadata.image_url` to a `storage://` hosted reference, preserves the former local value as `metadata.source_image_path`, and assigns C-3PO/K2. Override `BUBBLES_MANIFEST_PATH` or `BUBBLES_AGENT_ROOT` when the operating-agent files live elsewhere. The script accepts either `OCC_INTEGRATION_EMAIL` / `OCC_INTEGRATION_PASSWORD` or the existing `LUPE_API_EMAIL` / `LUPE_API_PASSWORD` variables.
 
+The canonical bordered-export remediation supersedes that legacy-original repair:
+
+```bash
+npm run bubbles:monthly -- 2026-08
+npm run bubbles:monthly -- 2026-08 --apply
+```
+
+The dry run requires exactly one date-prefixed bordered export for every day. Apply mode copies those files into the month source-of-truth folder, uploads them without overwriting existing objects, registers paired source/delivery asset records, preserves the date-to-image mapping, sets the standard Bubbles posting instructions, and writes one immutable `asset_remap_audit` row per post. A prior source record is marked `removable_after_copy` only after the new copy and OCC records succeed; deletion remains an explicit operator action.
+
+## Required Bubbles operating loop
+
+K2 stores the six-field research record and finalizes it. C-3PO calls `c3po_build_bubbles_package(content_item_id)` after final research and the bordered monthly asset exist; OCC then creates the caption fallback, caps hashtags at five, applies the standard instructions, creates the approval request, and queues the morning-of WhatsApp payload. The delivery adapter must send queued `approval_delivery_packets` at `scheduled_for` and write its provider message ID/status back to OCC.
+
+The post cannot enter a ready-or-later content state until all seven `qa_checklist` flags are true: assigned-day match, bordered monthly source export, caption/image match, K2 feed-fit note, hashtag limit, suggested time, and WhatsApp/OCC packet match. Herzen remains the human publisher and must store the final URL and publication screenshot in OCC after posting.
+
 ## Operator workflow
 
 1. Open Content and create or edit the record.

@@ -16,6 +16,12 @@ export type ResourceName =
   | "agent-work-dependencies"
   | "content-feedback"
   | "social-operations-queue"
+  | "content-research-records"
+  | "monthly-content-folders"
+  | "posting-instruction-templates"
+  | "asset-remap-audit"
+  | "bubbles-daily-operating-queue"
+  | "approval-delivery-packets"
   | "leads"
   | "workflows"
   | "activity";
@@ -123,6 +129,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "hashtags", "posting_instructions", "tags", "cta", "approval_state", "feedback_version", "package_manifest", "publication_state",
       "source_asset_id", "delivery_asset_id", "linked_research_work_item_id", "linked_creative_work_item_id",
       "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
+      "research_record_id", "qa_checklist", "qa_passed_at", "approval_packet", "approval_packet_state", "approval_packet_sent_at",
     ],
     updateFields: [
       "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
@@ -134,6 +141,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "hashtags", "posting_instructions", "tags", "cta", "approval_state", "feedback_version", "package_manifest", "publication_state",
       "source_asset_id", "delivery_asset_id", "linked_research_work_item_id", "linked_creative_work_item_id",
       "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
+      "research_record_id", "qa_checklist", "qa_passed_at", "approval_packet", "approval_packet_state", "approval_packet_sent_at",
     ],
     filters: [
       "property_id", "channel_id", "content_type_id", "owner_agent_id",
@@ -144,9 +152,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   },
   "content-assets": {
     table: "content_assets", mutable: true,
-    createFields: ["content_item_id", "asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id"],
-    updateFields: ["asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id"],
-    filters: ["content_item_id", "asset_role", "is_current", "attached_by_agent_id"], defaultOrder: "created_at",
+    createFields: ["content_item_id", "asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id", "monthly_folder_id", "assigned_publish_date", "removable_after_copy"],
+    updateFields: ["asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id", "monthly_folder_id", "assigned_publish_date", "removable_after_copy"],
+    filters: ["content_item_id", "asset_role", "is_current", "attached_by_agent_id", "monthly_folder_id", "assigned_publish_date", "removable_after_copy"], defaultOrder: "created_at",
   },
   "agent-work-items": {
     table: "agent_work_items", mutable: true,
@@ -168,6 +176,38 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   "social-operations-queue": {
     table: "social_operations_queue", mutable: false, createFields: [], updateFields: [],
     filters: ["property_id", "platform", "owner_agent_id", "status", "approval_state", "publication_state", "has_unresolved_feedback", "ready_to_deliver"], defaultOrder: "publish_at",
+  },
+  "content-research-records": {
+    table: "content_research_records", mutable: true,
+    createFields: ["content_item_id", "researcher_agent_id", "what_is_happening", "why_it_fits_account", "how_and_why_it_fits_feed", "current_trend_or_context", "caption_angle", "suggested_posting_time", "status", "finalized_at"],
+    updateFields: ["what_is_happening", "why_it_fits_account", "how_and_why_it_fits_feed", "current_trend_or_context", "caption_angle", "suggested_posting_time", "status", "finalized_at"],
+    filters: ["content_item_id", "researcher_agent_id", "status"], defaultOrder: "updated_at",
+  },
+  "monthly-content-folders": {
+    table: "monthly_content_folders", mutable: true,
+    createFields: ["property_id", "channel_id", "month_start", "storage_bucket", "storage_prefix", "created_by_agent_id"],
+    updateFields: ["storage_bucket", "storage_prefix", "created_by_agent_id"],
+    filters: ["property_id", "channel_id", "month_start", "created_by_agent_id"], defaultOrder: "month_start",
+  },
+  "posting-instruction-templates": {
+    table: "posting_instruction_templates", mutable: true,
+    createFields: ["property_id", "name", "platform", "instructions", "max_hashtags", "active"],
+    updateFields: ["name", "platform", "instructions", "max_hashtags", "active"],
+    filters: ["property_id", "platform", "active"], defaultOrder: "name",
+  },
+  "asset-remap-audit": {
+    table: "asset_remap_audit", mutable: false, createFields: [], updateFields: [],
+    filters: ["content_item_id", "publish_date", "new_source_asset_id"], defaultOrder: "remapped_at",
+  },
+  "bubbles-daily-operating-queue": {
+    table: "bubbles_daily_operating_queue", mutable: false, createFields: [], updateFields: [],
+    filters: ["status", "approval_state", "approval_packet_state", "qa_passes", "ready"], defaultOrder: "publish_at",
+  },
+  "approval-delivery-packets": {
+    table: "approval_delivery_packets", mutable: true,
+    createFields: ["content_item_id", "approval_id", "channel", "scheduled_for", "payload", "status"],
+    updateFields: ["scheduled_for", "payload", "status", "sent_at", "provider_message_id", "failure_message"],
+    filters: ["content_item_id", "approval_id", "channel", "status"], defaultOrder: "scheduled_for",
   },
   "content-status-history": {
     table: "content_status_history",
