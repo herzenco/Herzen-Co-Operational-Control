@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { isApiError, requireMember } from "../../../../../utils/api/auth";
-import { executeAutomationJob } from "../../../../../utils/content-automation/runner";
+import { automationErrorMessage, executeAutomationJob } from "../../../../../utils/content-automation/runner";
 import { createAutomationClient } from "../../../../../utils/content-automation/server";
 import type { AutomationJobType } from "../../../../../utils/content-automation/types";
 
@@ -15,7 +15,6 @@ export async function POST(request: Request) {
     const result = await executeAutomationJob(createAutomationClient(), body.job_type, { configuration: body.configuration || {} });
     return NextResponse.json({ data: result }, { status: 202 });
   } catch (error) {
-    return NextResponse.json({ error: { message: error instanceof Error ? error.message : "Automation failed." } }, { status: 500 });
+    return NextResponse.json({ error: { message: automationErrorMessage(error) } }, { status: 500 });
   }
 }
-

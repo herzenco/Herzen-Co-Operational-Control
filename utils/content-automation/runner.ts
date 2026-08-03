@@ -12,6 +12,15 @@ import { publishContent } from "./publishing";
 
 type DbRecord = Record<string, unknown>;
 
+export function automationErrorMessage(failure: unknown, fallback = "Automation failed.") {
+  if (failure instanceof Error) return failure.message;
+  if (failure && typeof failure === "object" && "message" in failure) {
+    const message = String((failure as { message?: unknown }).message || "").trim();
+    if (message) return message;
+  }
+  return fallback;
+}
+
 async function log(supabase: SupabaseClient, runId: string, event: string, message: string, context: DbRecord = {}, level = "info") {
   await supabase.from("workflow_run_logs").insert({ run_id: runId, level, event, message, context });
 }
@@ -201,7 +210,7 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
     await supabase.from("workflow_runs").update({ status: "succeeded", output, finished_at: new Date().toISOString() }).eq("id", run.id);
     return { run_id: run.id, status: "succeeded", output };
   } catch (failure) {
-    const message = failure instanceof Error ? failure.message : "Automation failed.";
+    const message = automationErrorMessage(failure);
     await log(supabase, run.id, "run_failed", message, {}, "error");
     await supabase.from("workflow_runs").update(attempt < 5 ? { status: "retrying", last_error: message, retry_at: new Date(Date.now() + 15 * 60_000).toISOString() } : { status: "failed", last_error: message, finished_at: new Date().toISOString() }).eq("id", run.id);
     throw failure;
@@ -216,7 +225,7 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
     await supabase.from("workflow_runs").update({ status: "cancelled", finished_at: now.toISOString(), output: { retry_dispatched: true } }).eq("id", retry.id);
     const configuration = { ...(retry.input as DbRecord), _attempt: Number(retry.attempt) + 1 };
     try { retryResults.push(await executeAutomationJob(supabase, retry.job_type as AutomationJobType, { now, configuration })); }
-    catch (failure) { retryResults.push({ status: "retrying", job_type: retry.job_type, error: failure instanceof Error ? failure.message : "Retry failed." }); }
+    catch (failure) { retryResults.push({ status: "retrying", job_type: retry.job_type, error: automationErrorMessage(failure, "Retry failed.") }); }
   }
   const { data: schedules, error } = await supabase.from("automation_schedules").select("*").eq("enabled", true).lte("next_run_at", now.toISOString()).order("next_run_at");
   if (error) throw error;
@@ -226,7 +235,7 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
     const nextRunAt = nextScheduledAt(schedule.job_type as AutomationJobType, new Date(scheduledFor));
     await supabase.from("automation_schedules").update({ next_run_at: nextRunAt }).eq("id", schedule.id);
     try { results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, configuration: schedule.configuration, scheduleId: schedule.id, scheduledFor })); }
-    catch (failure) { results.push({ status: "retrying", job_type: schedule.job_type, error: failure instanceof Error ? failure.message : "Scheduled run failed." }); }
+    catch (failure) { results.push({ status: "retrying", job_type: schedule.job_type, error: automationErrorMessage(failure, "Scheduled run failed.") }); }
   }
   return [...retryResults, ...results];
 }
