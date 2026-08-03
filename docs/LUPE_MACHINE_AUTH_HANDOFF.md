@@ -12,6 +12,8 @@ Authorization: Bearer occ_agent_<random-secret>
 
 Only the SHA-256 hash is stored in `agent_api_credentials`. The plaintext key belongs in Lupe's secret manager and must never be committed, logged, placed in a URL, or pasted into OCC records.
 
+On Tito's Mac, the production key is stored in the login Keychain with service `herzenco-occ`, account `lupe`, and label `OCC_API_KEY`. Lupe's local launcher should read that Keychain item into its process environment at startup; the key is not stored in this repository or in a global machine environment variable.
+
 ## Production activation
 
 1. Configure `SUPABASE_SECRET_KEY` in the Vercel Production environment. This is server-only and must never use a `NEXT_PUBLIC_` prefix.
