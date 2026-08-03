@@ -18,6 +18,7 @@ type Viewer = {
 type Overview = {
   viewer: Viewer;
   agents: RecordValue[];
+  profiles: RecordValue[];
   projects: RecordValue[];
   tasks: RecordValue[];
   counts: {
@@ -32,7 +33,7 @@ type Overview = {
 type TaskForm = {
   title: string;
   description: string;
-  owner_agent_id: string;
+  assignee: string;
   project_id: string;
   priority: string;
   due_at: string;
@@ -62,11 +63,14 @@ type WorkLogForm = { agent_id: string; task_id: string; entry_type: string; titl
 type DailyUpdateForm = { agent_id: string; update_date: string; summary: string; completed: string; blockers: string; next_steps: string; asks: string; health: string };
 type LeadForm = { property_id: string; assigned_agent_id: string; contact_name: string; company: string; email: string; phone: string; source: string; subject: string; inquiry: string; status: string; priority: string; next_follow_up_at: string; notes: string };
 type ContentUtilityStatus = { contentId: string; message: string; kind: "success" | "error" };
+type CommandReviewKind = "task" | "content" | "approval" | "agent";
+type CommandReviewItem = { kind: CommandReviewKind; record: RecordValue };
+type CommandReview = { title: string; summary: string; items: CommandReviewItem[] };
 
 const EMPTY_FORM: TaskForm = {
   title: "",
   description: "",
-  owner_agent_id: "",
+  assignee: "",
   project_id: "",
   priority: "medium",
   due_at: "",
@@ -217,6 +221,8 @@ export function CommandCenter() {
   const [opsPublishDate, setOpsPublishDate] = useState("");
   const [todayLabel, setTodayLabel] = useState("Today");
   const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
+  const [commandReview, setCommandReview] = useState<CommandReview | null>(null);
+  const [selectedReviewItem, setSelectedReviewItem] = useState<CommandReviewItem | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
   const [selectedContent, setSelectedContent] = useState<RecordValue | null>(null);
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
@@ -472,7 +478,8 @@ export function CommandCenter() {
         priority: form.priority,
         definition_of_done: form.definition_of_done.trim(),
       };
-      if (form.owner_agent_id) payload.owner_agent_id = form.owner_agent_id;
+      if (form.assignee.startsWith("agent:")) payload.owner_agent_id = form.assignee.slice(6);
+      if (form.assignee.startsWith("human:")) payload.assigned_user_id = form.assignee.slice(6);
       if (form.project_id) payload.project_id = form.project_id;
       if (form.due_at) payload.due_at = new Date(form.due_at).toISOString();
       await request("/api/v1/tasks", { method: "POST", body: JSON.stringify(payload) });
@@ -592,6 +599,7 @@ export function CommandCenter() {
   }), [overview]);
   const projects = useMemo(() => overview?.projects || [], [overview]);
   const tasks = useMemo(() => overview?.tasks || [], [overview]);
+  const profiles = useMemo(() => overview?.profiles || [], [overview]);
   const agentMap = useMemo(
     () => new Map(agents.map((agent) => [String(agent.id), text(agent.name || agent.code)])),
     [agents],
@@ -600,6 +608,12 @@ export function CommandCenter() {
     () => new Map(projects.map((project) => [String(project.id), text(project.name || project.slug)])),
     [projects],
   );
+  const profileMap = useMemo(
+    () => new Map(profiles.map((profile) => [String(profile.user_id), text(profile.display_name)])),
+    [profiles],
+  );
+  const taskAssigneeName = (task: RecordValue) =>
+    profileMap.get(String(task.assigned_user_id)) || agentMap.get(String(task.owner_agent_id)) || "Unassigned";
   const latestUpdate = useMemo(() => {
     const map = new Map<string, RecordValue>();
     [...updates]
@@ -614,7 +628,9 @@ export function CommandCenter() {
   const visibleTasks = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return tasks.filter((task) => {
-      const laneMatch = lane === "all" || String(task.owner_agent_id) === lane;
+      const laneMatch = lane === "all"
+        || String(task.owner_agent_id) === lane
+        || `human:${String(task.assigned_user_id)}` === lane;
       const searchMatch = !needle || JSON.stringify(task).toLowerCase().includes(needle);
       return laneMatch && searchMatch;
     });
@@ -982,6 +998,34 @@ export function CommandCenter() {
     setDrawer("agent");
   }
 
+  function openCommandReview(title: string, summary: string, items: CommandReviewItem[]) {
+    setSelectedReviewItem(null);
+    setCommandReview({ title, summary, items });
+  }
+
+  function openTaskReview(task: RecordValue) {
+    const item = { kind: "task" as const, record: task };
+    setCommandReview({ title: "Instruction detail", summary: "Review the complete instruction record.", items: [item] });
+    setSelectedReviewItem(item);
+  }
+
+  function closeCommandReview() {
+    setCommandReview(null);
+    setSelectedReviewItem(null);
+  }
+
+  function reviewItemTitle(item: CommandReviewItem) {
+    return text(item.record.title || item.record.name || item.record.code, "Untitled item");
+  }
+
+  function reviewItemMeta(item: CommandReviewItem) {
+    if (item.kind === "task") return `${taskAssigneeName(item.record)} · ${statusLabel(taskStatus(item.record))} · ${dateLabel(item.record.due_at)}`;
+    if (item.kind === "content") return `${contentAccountName(item.record)} · ${contentPlatformForItem(item.record)} · ${dateLabel(item.record.publish_at)}`;
+    if (item.kind === "approval") return `${statusLabel(text(item.record.status, "pending"))} · ${dateLabel(item.record.due_at)}`;
+    const update = latestUpdate.get(String(item.record.id));
+    return `${text(item.record.role, "Agent")} · ${update ? `reported ${dateLabel(update.update_date)}` : "report missing"}`;
+  }
+
   function renderCommand() {
     return (
       <div className="commandView">
@@ -995,10 +1039,10 @@ export function CommandCenter() {
         <section className="deckPanel commandBrief">
           <header className="panelHead"><div><span>Daily brief</span><h2>{todayLabel}</h2></div><small>Live operational readout</small></header>
           <div className="briefSnapshot">
-            <div><span>Today’s focus</span><p>{dueToday.length || contentDueToday.length ? `${dueToday.length} instructions and ${contentDueToday.length} publications are due today. ${[...contentDueToday, ...dueToday].slice(0, 3).map((item) => text(item.title)).join(" · ")}` : "No instructions or publications are due today; use the window to clear review-stage work."}</p></div>
-            <div className={pendingApprovals.length ? "attention" : ""}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision.` : "No approval decisions are waiting."}</p></div>
-            <div className={blockedTasks.length || overdueTasks.length ? "attention" : ""}><span>Watch list</span><p>{blockedTasks.length || overdueTasks.length ? `${blockedTasks.length} blocked · ${overdueTasks.length} overdue. Lupe should resolve these before new work begins.` : "Nothing is blocked or overdue."}</p></div>
-            <div className={reporting < agents.length ? "attention" : ""}><span>Reporting</span><p>{reporting} of {agents.length} lanes have reported. {agents.length - reporting ? `${agents.length - reporting} updates are still missing.` : "The full roster is accounted for."}</p></div>
+            <button onClick={() => openCommandReview("Today’s focus", `${dueToday.length} instructions and ${contentDueToday.length} publications are due today.`, [...contentDueToday.map((record) => ({ kind: "content" as const, record })), ...dueToday.map((record) => ({ kind: "task" as const, record }))])}><span>Today’s focus</span><p>{dueToday.length || contentDueToday.length ? `${dueToday.length} instructions and ${contentDueToday.length} publications are due today. ${[...contentDueToday, ...dueToday].slice(0, 3).map((item) => text(item.title)).join(" · ")}` : "No instructions or publications are due today; use the window to clear review-stage work."}</p><small>Review items →</small></button>
+            <button className={pendingApprovals.length ? "attention" : ""} onClick={() => openCommandReview("Your attention", `${pendingApprovals.length} approval packages await a decision.`, pendingApprovals.map((record) => ({ kind: "approval", record })))}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision.` : "No approval decisions are waiting."}</p><small>Review items →</small></button>
+            <button className={blockedTasks.length || overdueTasks.length ? "attention" : ""} onClick={() => { const records = [...new Map([...blockedTasks, ...overdueTasks].map((record) => [String(record.id), record])).values()]; openCommandReview("Watch list", `${blockedTasks.length} blocked and ${overdueTasks.length} overdue instructions require attention.`, records.map((record) => ({ kind: "task", record }))); }}><span>Watch list</span><p>{blockedTasks.length || overdueTasks.length ? `${blockedTasks.length} blocked · ${overdueTasks.length} overdue. Lupe should resolve these before new work begins.` : "Nothing is blocked or overdue."}</p><small>Review items →</small></button>
+            <button className={reporting < agents.length ? "attention" : ""} onClick={() => openCommandReview("Reporting", `${reporting} of ${agents.length} lanes have reported.`, agents.map((record) => ({ kind: "agent", record })))}><span>Reporting</span><p>{reporting} of {agents.length} lanes have reported. {agents.length - reporting ? `${agents.length - reporting} updates are still missing.` : "The full roster is accounted for."}</p><small>Review lanes →</small></button>
           </div>
         </section>
 
@@ -1008,7 +1052,7 @@ export function CommandCenter() {
             <div className="miniKanbanGrid">
               {STATUS_COLUMNS.map((column) => {
                 const items = tasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
-                return <div key={column.id}><header><span>{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>{items.slice(0, 2).map((task) => <button key={String(task.id)} onClick={() => setView("kanban")}><b>{text(task.title)}</b><small>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</small></button>)}{!items.length && <p>Clear</p>}</div>;
+                return <div key={column.id}><header><span>{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>{items.slice(0, 2).map((task) => <button key={String(task.id)} onClick={() => openTaskReview(task)}><b>{text(task.title)}</b><small>{taskAssigneeName(task)}</small></button>)}{!items.length && <p>Clear</p>}</div>;
               })}
             </div>
           </section>
@@ -1062,7 +1106,7 @@ export function CommandCenter() {
             <section className="deckPanel">
               <header className="panelHead"><div><span className="dim">Today</span><h2>Due before close</h2></div><small>{dueToday.length}</small></header>
               {dueToday.slice(0, 5).map((task) => (
-                <div className="dueRow" key={String(task.id)}><i /><span><b>{text(task.title)}</b><small>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</small></span></div>
+                <div className="dueRow" key={String(task.id)}><i /><span><b>{text(task.title)}</b><small>{taskAssigneeName(task)}</small></span></div>
               ))}
               {!dueToday.length && <p className="opsEmpty">Nothing due today.</p>}
             </section>
@@ -1081,7 +1125,7 @@ export function CommandCenter() {
           <div className="ledgerRow" key={String(task.id)}>
             <button className={`squareCheck ${taskStatus(task) === "done" ? "done" : ""}`} onClick={() => void moveTask(task, taskStatus(task) === "done" ? "in_progress" : "done")} aria-label="Toggle completion"><i /></button>
             <span className="instruction"><b className={taskStatus(task) === "done" ? "struck" : ""}>{text(task.title)}</b><small>{text(task.description, "No context documented")}</small></span>
-            <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</button>
+            <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{taskAssigneeName(task)}</button>
             <span className={text(task.priority) === "urgent" ? "urgent" : ""}>{text(task.priority, "medium")}</span>
             <span className={`statusPill s${taskStatus(task).replace("_", "")}`}><i />{statusLabel(taskStatus(task))}</span>
             <span>{dateLabel(task.due_at)}</span>
@@ -1109,7 +1153,7 @@ export function CommandCenter() {
                     <header><span>{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
                     <h3>{text(task.title)}</h3>
                     <p>{text(task.description, "No context documented.")}</p>
-                    <footer><span><span className="agentMark">{initials(agentMap.get(String(task.owner_agent_id)))}</span>{agentMap.get(String(task.owner_agent_id)) || "Unassigned"}</span>
+                    <footer><span><span className="agentMark">{initials(taskAssigneeName(task))}</span>{taskAssigneeName(task)}</span>
                       {column.id !== "done" && <button onClick={() => void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done")}>Advance →</button>}
                     </footer>
                   </article>
@@ -1456,7 +1500,7 @@ export function CommandCenter() {
             <button className="outlineBtn" onClick={() => setDrawer("brief")}>Daily brief</button>
             <button className="liveBtn" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New instruction</button>
           </div>}
-          {view !== "workflows" && <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}</div>}
+          {view !== "workflows" && <div className="laneFilters"><span>Lane</span><button className={lane === "all" ? "active" : ""} onClick={() => setLane("all")}>All lanes</button>{agents.map((agent) => <button key={String(agent.id)} className={lane === String(agent.id) ? "active" : ""} onClick={() => setLane(String(agent.id))}>{text(agent.name || agent.code)}</button>)}{["command", "kanban", "list"].includes(view) && profiles.map((profile) => <button key={String(profile.user_id)} className={lane === `human:${String(profile.user_id)}` ? "active" : ""} onClick={() => setLane(`human:${String(profile.user_id)}`)}>{text(profile.display_name)}</button>)}</div>}
         </header>
 
         <section className={`deckContent ${view === "workflows" ? "workflowDeckContent" : ""}`}>
@@ -1486,6 +1530,50 @@ export function CommandCenter() {
         ))}
       </nav>
 
+      {commandReview && (
+        <div className="commandReviewShade" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCommandReview(); }}>
+          <section className="commandReviewDialog" role="dialog" aria-modal="true" aria-labelledby="command-review-title">
+            <header>
+              <div><span className="liveLabel"><i />Command review</span><h2 id="command-review-title">{selectedReviewItem ? reviewItemTitle(selectedReviewItem) : commandReview.title}</h2></div>
+              <button className="drawerClose" onClick={closeCommandReview}>Close</button>
+            </header>
+            {selectedReviewItem ? (
+              <div className="commandReviewDetail">
+                <button className="reviewBack" onClick={() => setSelectedReviewItem(null)}>← Back to {commandReview.title}</button>
+                <div className="reviewStatus">{reviewItemMeta(selectedReviewItem)}</div>
+                {selectedReviewItem.kind === "task" && <>
+                  <div className="briefLine"><span>Context</span><p>{text(selectedReviewItem.record.description, "No context documented.")}</p></div>
+                  <div className="briefLine"><span>Definition of done</span><p>{text(selectedReviewItem.record.definition_of_done, "No completion criteria documented.")}</p></div>
+                  <div className="briefLine"><span>Project</span><p>{projectMap.get(String(selectedReviewItem.record.project_id)) || "General"}</p></div>
+                  <div className="briefLine"><span>Priority</span><p>{text(selectedReviewItem.record.priority, "medium")}</p></div>
+                </>}
+                {selectedReviewItem.kind === "content" && <>
+                  <div className="briefLine"><span>Publication</span><p>{selectedReviewItem.record.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedReviewItem.record.publish_at))) : "Not scheduled"}</p></div>
+                  <div className="briefLine"><span>Caption</span><p>{text(selectedReviewItem.record.caption, "No caption documented.")}</p></div>
+                  <button className="liveBtn reviewPrimary" onClick={() => { const record = selectedReviewItem.record; closeCommandReview(); previewContent(record); }}>Open full content preview</button>
+                </>}
+                {selectedReviewItem.kind === "approval" && <>
+                  <div className="briefLine"><span>Summary</span><p>{text(selectedReviewItem.record.summary, "No summary documented.")}</p></div>
+                  <div className="briefLine"><span>Recommendation</span><p>{text(selectedReviewItem.record.recommendation, "No recommendation documented.")}</p></div>
+                  <button className="liveBtn reviewPrimary" onClick={() => { closeCommandReview(); setView("approvals"); }}>Open approval queue</button>
+                </>}
+                {selectedReviewItem.kind === "agent" && (() => { const update = latestUpdate.get(String(selectedReviewItem.record.id)); return <>
+                  <div className="briefLine"><span>Operating lane</span><p>{text(selectedReviewItem.record.lane || selectedReviewItem.record.charter, "No lane documented.")}</p></div>
+                  <div className="briefLine"><span>Latest report</span><p>{update ? text(update.summary, "Report submitted without a summary.") : "No daily update has been submitted."}</p></div>
+                  <button className="liveBtn reviewPrimary" onClick={() => { const record = selectedReviewItem.record; closeCommandReview(); openAgent(record); }}>Open agent space</button>
+                </>; })()}
+              </div>
+            ) : (
+              <div className="commandReviewList">
+                <p>{commandReview.summary}</p>
+                {commandReview.items.map((item) => <button key={`${item.kind}-${String(item.record.id)}`} onClick={() => setSelectedReviewItem(item)}><span><b>{reviewItemTitle(item)}</b><small>{reviewItemMeta(item)}</small></span><i>View →</i></button>)}
+                {!commandReview.items.length && <div className="reviewEmpty">There are no items in this tile right now.</div>}
+              </div>
+            )}
+          </section>
+        </div>
+      )}
+
       {drawer && (
         <div className="drawerShade" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawer(null); }}>
           <aside className="deckDrawer">
@@ -1495,7 +1583,7 @@ export function CommandCenter() {
                 <span className="liveLabel"><i />New instruction</span><h2>Put direction into motion.</h2><p>Assign the lane, context, due date, and definition of done. Lupe and the agent roster will work from this record.</p>
                 <label>Instruction<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="What needs to happen?" /></label>
                 <label>Context<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
-                <div className="formPair"><label>Agent<select value={form.owner_agent_id} onChange={(event) => setForm({ ...form, owner_agent_id: event.target.value })}><option value="">Unassigned</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
+                <div className="formPair"><label>Assignee<select value={form.assignee} onChange={(event) => setForm({ ...form, assignee: event.target.value })}><option value="">Unassigned</option><optgroup label="People">{profiles.map((profile) => <option key={String(profile.user_id)} value={`human:${String(profile.user_id)}`}>{text(profile.display_name)}</option>)}</optgroup><optgroup label="Agents">{agents.map((agent) => <option key={String(agent.id)} value={`agent:${String(agent.id)}`}>{text(agent.name || agent.code)}</option>)}</optgroup></select></label>
                   <label>Project<select value={form.project_id} onChange={(event) => setForm({ ...form, project_id: event.target.value })}><option value="">General</option>{projects.map((project) => <option key={String(project.id)} value={String(project.id)}>{text(project.name || project.slug)}</option>)}</select></label></div>
                 <div className="formPair"><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Due<input type="datetime-local" value={form.due_at} onChange={(event) => setForm({ ...form, due_at: event.target.value })} /></label></div>
                 <label>Definition of done<textarea value={form.definition_of_done} onChange={(event) => setForm({ ...form, definition_of_done: event.target.value })} /></label>

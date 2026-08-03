@@ -1,5 +1,6 @@
 export type ResourceName =
   | "agents"
+  | "operations-profiles"
   | "projects"
   | "tasks"
   | "work-logs"
@@ -15,6 +16,21 @@ export type ResourceName =
   | "agent-work-dependencies"
   | "content-feedback"
   | "social-operations-queue"
+  | "content-research-records"
+  | "monthly-content-folders"
+  | "posting-instruction-templates"
+  | "asset-remap-audit"
+  | "bubbles-daily-operating-queue"
+  | "approval-delivery-packets"
+  | "content-generation-runs"
+  | "content-pairs"
+  | "content-audits"
+  | "content-review-events"
+  | "automation-schedules"
+  | "workflow-runs"
+  | "workflow-run-logs"
+  | "content-delivery-jobs"
+  | "content-publish-jobs"
   | "leads"
   | "workflows"
   | "activity";
@@ -29,6 +45,14 @@ type ResourceConfig = {
 };
 
 export const resources: Record<ResourceName, ResourceConfig> = {
+  "operations-profiles": {
+    table: "operations_profiles",
+    mutable: false,
+    createFields: [],
+    updateFields: [],
+    filters: ["user_id", "active"],
+    defaultOrder: "display_name",
+  },
   agents: {
     table: "agents",
     mutable: true,
@@ -48,9 +72,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   tasks: {
     table: "tasks",
     mutable: true,
-    createFields: ["title", "description", "project_id", "owner_agent_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata"],
-    updateFields: ["title", "description", "project_id", "owner_agent_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata", "completed_at"],
-    filters: ["project_id", "owner_agent_id", "status", "priority"],
+    createFields: ["title", "description", "project_id", "owner_agent_id", "assigned_user_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata"],
+    updateFields: ["title", "description", "project_id", "owner_agent_id", "assigned_user_id", "status", "priority", "due_at", "definition_of_done", "dependencies", "tags", "metadata", "completed_at"],
+    filters: ["project_id", "owner_agent_id", "assigned_user_id", "status", "priority"],
     defaultOrder: "created_at",
   },
   "work-logs": {
@@ -114,6 +138,8 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "hashtags", "posting_instructions", "tags", "cta", "approval_state", "feedback_version", "package_manifest", "publication_state",
       "source_asset_id", "delivery_asset_id", "linked_research_work_item_id", "linked_creative_work_item_id",
       "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
+      "research_record_id", "qa_checklist", "qa_passed_at", "approval_packet", "approval_packet_state", "approval_packet_sent_at",
+      "paired_content_item_id", "generation_run_id", "target_audience", "conversion_goal", "slug", "seo_title", "meta_description", "reasoning_summary", "source_links", "audit_status", "audit_iteration_count", "seo_score", "aeo_score", "audit_summary", "audit_blockers", "review_ready_at", "review_url", "review_approved_at", "review_approved_by",
     ],
     updateFields: [
       "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
@@ -125,6 +151,8 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "hashtags", "posting_instructions", "tags", "cta", "approval_state", "feedback_version", "package_manifest", "publication_state",
       "source_asset_id", "delivery_asset_id", "linked_research_work_item_id", "linked_creative_work_item_id",
       "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
+      "research_record_id", "qa_checklist", "qa_passed_at", "approval_packet", "approval_packet_state", "approval_packet_sent_at",
+      "paired_content_item_id", "generation_run_id", "target_audience", "conversion_goal", "slug", "seo_title", "meta_description", "reasoning_summary", "source_links", "audit_status", "audit_iteration_count", "seo_score", "aeo_score", "audit_summary", "audit_blockers", "review_ready_at", "review_url", "review_approved_at", "review_approved_by",
     ],
     filters: [
       "property_id", "channel_id", "content_type_id", "owner_agent_id",
@@ -135,9 +163,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   },
   "content-assets": {
     table: "content_assets", mutable: true,
-    createFields: ["content_item_id", "asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id"],
-    updateFields: ["asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id"],
-    filters: ["content_item_id", "asset_role", "is_current", "attached_by_agent_id"], defaultOrder: "created_at",
+    createFields: ["content_item_id", "asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id", "monthly_folder_id", "assigned_publish_date", "removable_after_copy"],
+    updateFields: ["asset_role", "storage_bucket", "storage_path", "external_url", "file_name", "mime_type", "byte_size", "checksum_sha256", "version", "is_current", "metadata", "attached_by_agent_id", "monthly_folder_id", "assigned_publish_date", "removable_after_copy"],
+    filters: ["content_item_id", "asset_role", "is_current", "attached_by_agent_id", "monthly_folder_id", "assigned_publish_date", "removable_after_copy"], defaultOrder: "created_at",
   },
   "agent-work-items": {
     table: "agent_work_items", mutable: true,
@@ -160,6 +188,47 @@ export const resources: Record<ResourceName, ResourceConfig> = {
     table: "social_operations_queue", mutable: false, createFields: [], updateFields: [],
     filters: ["property_id", "platform", "owner_agent_id", "status", "approval_state", "publication_state", "has_unresolved_feedback", "ready_to_deliver"], defaultOrder: "publish_at",
   },
+  "content-research-records": {
+    table: "content_research_records", mutable: true,
+    createFields: ["content_item_id", "researcher_agent_id", "what_is_happening", "why_it_fits_account", "how_and_why_it_fits_feed", "current_trend_or_context", "caption_angle", "suggested_posting_time", "status", "finalized_at"],
+    updateFields: ["what_is_happening", "why_it_fits_account", "how_and_why_it_fits_feed", "current_trend_or_context", "caption_angle", "suggested_posting_time", "status", "finalized_at"],
+    filters: ["content_item_id", "researcher_agent_id", "status"], defaultOrder: "updated_at",
+  },
+  "monthly-content-folders": {
+    table: "monthly_content_folders", mutable: true,
+    createFields: ["property_id", "channel_id", "month_start", "storage_bucket", "storage_prefix", "created_by_agent_id"],
+    updateFields: ["storage_bucket", "storage_prefix", "created_by_agent_id"],
+    filters: ["property_id", "channel_id", "month_start", "created_by_agent_id"], defaultOrder: "month_start",
+  },
+  "posting-instruction-templates": {
+    table: "posting_instruction_templates", mutable: true,
+    createFields: ["property_id", "name", "platform", "instructions", "max_hashtags", "active"],
+    updateFields: ["name", "platform", "instructions", "max_hashtags", "active"],
+    filters: ["property_id", "platform", "active"], defaultOrder: "name",
+  },
+  "asset-remap-audit": {
+    table: "asset_remap_audit", mutable: false, createFields: [], updateFields: [],
+    filters: ["content_item_id", "publish_date", "new_source_asset_id"], defaultOrder: "remapped_at",
+  },
+  "bubbles-daily-operating-queue": {
+    table: "bubbles_daily_operating_queue", mutable: false, createFields: [], updateFields: [],
+    filters: ["status", "approval_state", "approval_packet_state", "qa_passes", "ready"], defaultOrder: "publish_at",
+  },
+  "approval-delivery-packets": {
+    table: "approval_delivery_packets", mutable: true,
+    createFields: ["content_item_id", "approval_id", "channel", "scheduled_for", "payload", "status"],
+    updateFields: ["scheduled_for", "payload", "status", "sent_at", "provider_message_id", "failure_message"],
+    filters: ["content_item_id", "approval_id", "channel", "status"], defaultOrder: "scheduled_for",
+  },
+  "content-generation-runs": { table: "content_generation_runs", mutable: false, createFields: [], updateFields: [], filters: ["property_id", "month_start", "status"], defaultOrder: "created_at" },
+  "content-pairs": { table: "content_pairs", mutable: false, createFields: [], updateFields: [], filters: ["generation_run_id", "blog_content_item_id", "linkedin_content_item_id"], defaultOrder: "created_at" },
+  "content-audits": { table: "content_audits", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "provider", "passed"], defaultOrder: "created_at" },
+  "content-review-events": { table: "content_review_events", mutable: true, createFields: ["content_item_id", "event_type", "comment", "reviewer_name", "reviewer_email"], updateFields: ["event_type", "comment", "triaged_by_agent_id"], filters: ["content_item_id", "event_type", "triaged_by_agent_id"], defaultOrder: "created_at" },
+  "automation-schedules": { table: "automation_schedules", mutable: true, createFields: ["job_type", "timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], updateFields: ["timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], filters: ["job_type", "enabled"], defaultOrder: "next_run_at" },
+  "workflow-runs": { table: "workflow_runs", mutable: false, createFields: [], updateFields: [], filters: ["schedule_id", "generation_run_id", "job_type", "status"], defaultOrder: "created_at" },
+  "workflow-run-logs": { table: "workflow_run_logs", mutable: false, createFields: [], updateFields: [], filters: ["run_id", "level", "event"], defaultOrder: "created_at" },
+  "content-delivery-jobs": { table: "content_delivery_jobs", mutable: false, createFields: [], updateFields: [], filters: ["delivery_type", "status"], defaultOrder: "scheduled_for" },
+  "content-publish-jobs": { table: "content_publish_jobs", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "platform", "status"], defaultOrder: "scheduled_for" },
   "content-status-history": {
     table: "content_status_history",
     mutable: false,

@@ -5,17 +5,22 @@ export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-  const isLoginRoute =
-    request.nextUrl.pathname === "/login" ||
-    request.nextUrl.pathname === "/api/auth/login";
+  const isPublicAuthRoute = [
+    "/login", "/recover", "/reset-password", "/auth/callback",
+    "/api/auth/login", "/api/auth/recover", "/api/auth/update-password",
+  ].includes(request.nextUrl.pathname);
   const isOperationsApi =
     request.nextUrl.pathname === "/api/v1" ||
     request.nextUrl.pathname.startsWith("/api/v1/");
+  const isPublicAutomationRoute =
+    request.nextUrl.pathname === "/api/cron/content-automation" ||
+    request.nextUrl.pathname === "/api/review/content" ||
+    request.nextUrl.pathname.startsWith("/review/content/");
 
   // Allow local smoke tests and unauthenticated shells to render predictable
   // boundaries even when project secrets are not loaded.
   if (!supabaseUrl || !supabaseKey) {
-    if (!isLoginRoute && !isOperationsApi) {
+    if (!isPublicAuthRoute && !isOperationsApi && !isPublicAutomationRoute) {
       const loginUrl = request.nextUrl.clone();
       loginUrl.pathname = "/login";
       loginUrl.search = "";
@@ -56,11 +61,11 @@ export async function updateSession(request: NextRequest) {
   const isAuthenticated = Boolean(data?.claims);
   // API v1 authenticates bearer tokens inside each route rather than with
   // browser cookies, so it must bypass the human-login redirect.
-  if (isOperationsApi) {
+  if (isOperationsApi || isPublicAutomationRoute) {
     return supabaseResponse;
   }
 
-  if (!isAuthenticated && !isLoginRoute) {
+  if (!isAuthenticated && !isPublicAuthRoute) {
     const loginUrl = request.nextUrl.clone();
     loginUrl.pathname = "/login";
     loginUrl.search = "";

@@ -5,8 +5,7 @@ operator control over the Operations Control Center.
 
 ## Security model
 
-- Lupe has a dedicated Supabase Auth identity: `lupe@herzenco.co`.
-- The API uses short-lived Supabase bearer tokens and renewable refresh tokens.
+- Human operators use short-lived Supabase sessions. Lupe uses a dedicated, revocable OCC machine key.
 - Every request is checked against `operations_members`.
 - Lupe is assigned the `operator` role with complete read and write access.
 - Anonymous database access is revoked.
@@ -15,8 +14,8 @@ operator control over the Operations Control Center.
 - Never put Lupe's password, access token, or refresh token in a URL, source
   file, log, issue, or chat transcript.
 
-Local credentials are stored only in `.env.local` and are intentionally ignored
-by Git. Production credentials should be placed in Lupe's secret manager.
+Lupe's plaintext machine key is stored only in its secret manager. See
+[`LUPE_MACHINE_AUTH_HANDOFF.md`](./LUPE_MACHINE_AUTH_HANDOFF.md).
 
 ## Base URLs
 
@@ -39,7 +38,15 @@ Live behavior verified on 2026-07-31:
   `Send a Supabase access token as Authorization: Bearer <token>.`
 - `https://operations.herzenco.co/login` is publicly reachable.
 
-## Authenticate
+## Authenticate Lupe
+
+Lupe sends its machine key directly. It does not exchange an email and password and does not refresh a browser session:
+
+```http
+Authorization: Bearer <OCC_API_KEY>
+```
+
+## Authenticate a human integration
 
 Exchange Lupe's company identity for a short-lived access token:
 
@@ -141,6 +148,14 @@ Supported filters:
 - Content status history: `content_item_id`, `from_status`, `to_status`,
   `changed_by`
 - Activity: `actor_user_id`, `action`, `entity_type`, `entity_id`
+
+Content queues must be property-scoped for automation. Use the canonical UUID selector:
+
+```http
+GET /api/v1/content-items?property_id=<content_properties.id>&limit=100
+```
+
+For compatibility, `property=<slug>` and the legacy `brand=<slug>` resolve through `content_properties.slug` and apply the same server-side `property_id` predicate. Unknown or conflicting selectors fail closed; they never fall back to an unscoped content queue. The Bubbles workflow uses `property_id=28c377e7-0f86-4b69-909f-5b0e1f467fc2`.
 
 ## Content operating model
 

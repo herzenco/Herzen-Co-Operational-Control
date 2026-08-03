@@ -5,8 +5,9 @@ export async function GET(request: Request) {
   const context = await requireMember(request);
   if (isApiError(context)) return context;
 
-  const [agents, projects, tasks, updates, approvals, activity] = await Promise.all([
+  const [agents, profiles, projects, tasks, updates, approvals, activity] = await Promise.all([
     context.supabase.from("agents").select("*").order("created_at"),
+    context.supabase.from("operations_profiles").select("user_id,display_name,profile_type,active").eq("active", true).order("display_name"),
     context.supabase.from("projects").select("*").order("created_at"),
     context.supabase.from("tasks").select("*").order("created_at", { ascending: false }),
     context.supabase.from("daily_updates").select("*").order("update_date", { ascending: false }).limit(25),
@@ -14,7 +15,7 @@ export async function GET(request: Request) {
     context.supabase.from("activity_log").select("*").order("created_at", { ascending: false }).limit(50),
   ]);
 
-  const error = [agents, projects, tasks, updates, approvals, activity]
+  const error = [agents, profiles, projects, tasks, updates, approvals, activity]
     .map((result) => result.error)
     .find(Boolean);
   if (error) return fail(500, "database_error", error.message);
@@ -22,6 +23,7 @@ export async function GET(request: Request) {
   return ok({
     viewer: context.member,
     agents: agents.data,
+    profiles: profiles.data,
     projects: projects.data,
     tasks: tasks.data,
     daily_updates: updates.data,

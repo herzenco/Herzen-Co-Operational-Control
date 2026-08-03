@@ -32,7 +32,7 @@ export async function POST(request: Request) {
   const parsed = validateWorkflowPayload(body);
   if (!parsed.success) return fail(422, "workflow_invalid", "The workflow definition is invalid.", { errors: parsed.errors });
 
-  const payload = workflowWritePayload(parsed.definition, context.user.id, true);
+  const payload = workflowWritePayload(parsed.definition, context.user!.id, true);
   const { data, error } = await context.supabase.from("workflows").insert(payload).select().single();
   if (error) return fail(error.code === "23505" ? 409 : 400, "write_failed", error.message, { postgres_code: error.code });
   return ok(data, { status: 201 });
