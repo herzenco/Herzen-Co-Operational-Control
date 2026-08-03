@@ -15,7 +15,12 @@ async function gatewayJson<T>(model: string, system: string, prompt: string): Pr
     body: JSON.stringify({
       model,
       messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
-      response_format: { type: "json_object" },
+      response_format: {
+        type: "json",
+        name: "occ_structured_output",
+        description: "Structured JSON for the OCC content automation pipeline.",
+        schema: { type: "object", additionalProperties: true },
+      },
     }),
   });
   if (!response.ok) throw new Error(`AI Gateway request failed (${response.status}): ${await response.text()}`);
