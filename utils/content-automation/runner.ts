@@ -176,9 +176,12 @@ async function runK2Refresh(supabase: SupabaseClient, configuration: DbRecord) {
   return { refreshed_at: new Date().toISOString(), generation_runs_updated: runs?.length || 0, context_counts: { prior_assets: context.prior_assets.length, review_history: context.review_history.length, audit_history: context.audit_history.length } };
 }
 
-async function runAuditRetry(supabase: SupabaseClient, runId: string) {
+async function runAuditRetry(supabase: SupabaseClient, runId: string, configuration: DbRecord = {}) {
   const property = await requireSingle(supabase.from("content_properties").select("id").eq("slug", "herzen-co").single(), "Herzen Co. property");
-  const { data, error } = await supabase.from("content_items").select("*").eq("property_id", property.id).contains("metadata", { automation_phase: 1 }).in("audit_status", ["pending","failed"]).lt("audit_iteration_count", 5).limit(10);
+  let retryQuery = supabase.from("content_items").select("*").eq("property_id", property.id).contains("metadata", { automation_phase: 1 }).in("audit_status", ["pending","failed"]).lt("audit_iteration_count", 5);
+  const contentItemIds = Array.isArray(configuration.content_item_ids) ? configuration.content_item_ids.map(String) : [];
+  if (contentItemIds.length) retryQuery = retryQuery.in("id", contentItemIds);
+  const { data, error } = await retryQuery.limit(Math.min(10, Math.max(1, Number(configuration.batch_size || 10))));
   if (error) throw error;
   const results = [];
   for (const item of data || []) {
@@ -213,7 +216,7 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
     let output: DbRecord;
     if (jobType === "monthly_generation") output = await runMonthlyGeneration(supabase, run.id, now, options.configuration || {});
     else if (jobType === "weekly_review_pack" || jobType === "publish_day_notice") output = await reviewDelivery(supabase, jobType, now, options.configuration || {});
-    else if (jobType === "audit_retry") output = await runAuditRetry(supabase, run.id);
+    else if (jobType === "audit_retry") output = await runAuditRetry(supabase, run.id, options.configuration || {});
     else output = await runK2Refresh(supabase, options.configuration || {});
     await supabase.from("workflow_runs").update({ status: "succeeded", output, finished_at: new Date().toISOString() }).eq("id", run.id);
     return { run_id: run.id, status: "succeeded", output };

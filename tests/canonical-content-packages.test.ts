@@ -45,6 +45,8 @@ test("C-3PO readiness accepts a verified canonical K2 research record", () => {
 test("automated queues are property scoped", () => {
   assert.match(runner, /eq\("property_id", property\.id\)/);
   assert.match(runner, /contains\("metadata", \{ automation_phase: 1 \}\)/);
+  assert.match(runner, /configuration\.content_item_ids/);
+  assert.match(runner, /retryQuery = retryQuery\.in\("id", contentItemIds\)/);
 });
 
 test("review decisions synchronize the independent approval object", () => {
