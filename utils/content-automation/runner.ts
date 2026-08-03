@@ -61,14 +61,14 @@ async function createContentRecord(supabase: SupabaseClient, input: {
   return data as DbRecord;
 }
 
-async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbRecord, asset: GeneratedAsset, topic: PlannedTopic, context: DbRecord) {
+async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbRecord, asset: GeneratedAsset, topic: PlannedTopic, context: DbRecord, maxIterations = 10) {
   const writer = new OpenAIJsonModel();
   const auditor = createAuditor(new AnthropicJsonModel());
   let currentAsset = asset;
   const contentRole = String((item.metadata as DbRecord)?.content_role || "");
   const auditContext = { ...context, intended_platform: contentRole === "linkedin_companion" ? "linkedin" : "website_blog" };
   let iteration = Number(item.audit_iteration_count || 0);
-  while (iteration < 10) {
+  while (iteration < maxIterations) {
     iteration += 1;
     await supabase.from("content_items").update({ audit_status: "running", audit_iteration_count: iteration }).eq("id", item.id);
     const result = await auditor.audit(currentAsset, auditContext);
@@ -181,7 +181,7 @@ async function runK2Refresh(supabase: SupabaseClient, configuration: DbRecord) {
 async function runAuditRetry(supabase: SupabaseClient, runId: string, configuration: DbRecord = {}) {
   const property = await requireSingle(supabase.from("content_properties").select("id").eq("slug", "herzen-co").single(), "Herzen Co. property");
   const contentItemIds = Array.isArray(configuration.content_item_ids) ? configuration.content_item_ids.map(String) : [];
-  const iterationLimit = contentItemIds.length && configuration.continue_after_check_in === true ? 10 : 5;
+  const iterationLimit = contentItemIds.length && configuration.continue_after_check_in === true ? 15 : 5;
   let retryQuery = supabase.from("content_items").select("*").eq("property_id", property.id).contains("metadata", { automation_phase: 1 }).in("audit_status", ["pending","failed"]).lt("audit_iteration_count", iterationLimit);
   if (contentItemIds.length) retryQuery = retryQuery.in("id", contentItemIds);
   const { data, error } = await retryQuery.limit(Math.min(10, Math.max(1, Number(configuration.batch_size || 10))));
@@ -190,7 +190,7 @@ async function runAuditRetry(supabase: SupabaseClient, runId: string, configurat
   for (const item of data || []) {
     const topic = { topic_key: item.slug || item.id, title: item.title, rationale: item.brief || "", timely: true, target_audience: item.target_audience || "Herzen Co. audience", conversion_goal: item.conversion_goal || "Website visit", cta: String((item.metadata as DbRecord)?.cta || "Visit the website"), publish_at: item.publish_at, source_links: item.source_links || [] } as PlannedTopic;
     const asset = { title: item.title, body: item.body, caption: item.caption, slug: item.slug, seo_title: item.seo_title, meta_description: item.meta_description, reasoning_summary: item.reasoning_summary } as GeneratedAsset;
-    results.push(await auditUntilGate(supabase, runId, item, asset, topic, {}));
+    results.push(await auditUntilGate(supabase, runId, item, asset, topic, {}, iterationLimit));
   }
   const { data: publishJobs, error: publishError } = await supabase.from("content_publish_jobs").select("*,content_items(*)").eq("status", "queued").lte("scheduled_for", new Date().toISOString()).limit(10);
   if (publishError) throw publishError;
