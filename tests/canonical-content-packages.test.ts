@@ -8,12 +8,20 @@ const migration = readFileSync(new URL("../supabase/migrations/20260803190000_ca
 const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
 const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
 const packages = readFileSync(new URL("../utils/content-automation/packages.ts", import.meta.url), "utf8");
+const gateExecutionMigration = readFileSync(new URL("../supabase/migrations/20260803225500_fix_phase1_gate_execution.sql", import.meta.url), "utf8");
 
 test("Phase 1 ready state requires the complete canonical package", () => {
   for (const requirement of ["paired_content_item_id", "research_record_id", "source_asset_id", "delivery_asset_id", "posting_instructions", "approval_id", "review_url", "herzen_phase1_qa_passes"]) {
     assert.match(migration, new RegExp(requirement));
   }
   assert.equal(Object.values(readyQaChecklist()).every(Boolean), true);
+});
+
+test("the private package gate remains invoker-safe without private schema access", () => {
+  assert.match(gateExecutionMigration, /create or replace function private\.validate_herzen_phase1_package\(\)/i);
+  assert.doesNotMatch(gateExecutionMigration, /security definer/i);
+  assert.match(gateExecutionMigration, /new\.qa_checklist ->> 'seo_aeo_gate_passed'/i);
+  assert.match(gateExecutionMigration, /revoke all on function private\.validate_herzen_phase1_package\(\) from public/i);
 });
 
 test("every failed rewrite is persisted and pilot generation is capped", () => {
