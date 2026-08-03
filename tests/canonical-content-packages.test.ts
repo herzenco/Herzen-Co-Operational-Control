@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import test from "node:test";
+import { readyQaChecklist } from "../utils/content-automation/packages";
+import { etDayStart } from "../utils/content-automation/schedule";
+
+const migration = readFileSync(new URL("../supabase/migrations/20260803190000_canonical_content_packages.sql", import.meta.url), "utf8");
+const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
+const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
+
+test("Phase 1 ready state requires the complete canonical package", () => {
+  for (const requirement of ["paired_content_item_id", "research_record_id", "source_asset_id", "delivery_asset_id", "posting_instructions", "approval_id", "review_url", "herzen_phase1_qa_passes"]) {
+    assert.match(migration, new RegExp(requirement));
+  }
+  assert.equal(Object.values(readyQaChecklist()).every(Boolean), true);
+});
+
+test("every failed rewrite is persisted and pilot generation is capped", () => {
+  assert.match(migration, /create table public\.content_rewrite_iterations/);
+  assert.match(runner, /content_rewrite_iterations/);
+  assert.match(runner, /pair_limit \|\| 1/);
+});
+
+test("automated queues are property scoped", () => {
+  assert.match(runner, /eq\("property_id", property\.id\)/);
+  assert.match(runner, /contains\("metadata", \{ automation_phase: 1 \}\)/);
+});
+
+test("review decisions synchronize the independent approval object", () => {
+  assert.match(reviewRoute, /currentItem\?\.approval_id/);
+  assert.match(reviewRoute, /from\("approvals"\)\.update/);
+  assert.doesNotMatch(reviewRoute, /approval_state: action === "declined" \? "rejected"/);
+});
+
+test("ET calendar boundaries remain correct across daylight saving changes", () => {
+  assert.equal(etDayStart(new Date("2026-08-03T16:00:00Z")).toISOString(), "2026-08-03T04:00:00.000Z");
+  assert.equal(etDayStart(new Date("2026-12-03T16:00:00Z")).toISOString(), "2026-12-03T05:00:00.000Z");
+});

@@ -10,6 +10,15 @@ export async function publishContent(supabase: SupabaseClient, item: Record<stri
   if (!finalUrl) throw new Error(`${platform} publishing did not return a canonical URL.`);
   const { error } = await supabase.from("content_items").update({ status: "published", publication_state: "published", final_url: finalUrl, published_at: new Date().toISOString(), external_job_id: result.id || null, external_status: "published" }).eq("id", item.id);
   if (error) throw error;
+  if (platform === "website" && item.paired_content_item_id) {
+    const { data: companion, error: companionError } = await supabase.from("content_items").select("id,body,caption,metadata").eq("id", item.paired_content_item_id).single();
+    if (companionError) throw companionError;
+    const priorMetadata = (companion.metadata || {}) as Record<string, unknown>;
+    const priorUrl = String(priorMetadata.planned_website_url || priorMetadata.website_url || "");
+    const metadata = { ...priorMetadata, website_url: finalUrl };
+    const replaceUrl = (value: unknown) => priorUrl ? String(value || "").replaceAll(priorUrl, finalUrl) : String(value || "");
+    const { error: syncError } = await supabase.from("content_items").update({ metadata, body: replaceUrl(companion.body), caption: replaceUrl(companion.caption) }).eq("id", companion.id);
+    if (syncError) throw syncError;
+  }
   return finalUrl;
 }
-

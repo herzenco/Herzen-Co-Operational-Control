@@ -9,6 +9,18 @@ function etParts(date: Date) {
   return Object.fromEntries(parts.map((part) => [part.type, part.value]));
 }
 
+export function etDayStart(date: Date) {
+  const parts = etParts(date);
+  const year = Number(parts.year);
+  const month = Number(parts.month);
+  const day = Number(parts.day);
+  const noonUtc = new Date(Date.UTC(year, month - 1, day, 12));
+  const noonParts = etParts(noonUtc);
+  const representedAsUtc = Date.UTC(Number(noonParts.year), Number(noonParts.month) - 1, Number(noonParts.day), Number(noonParts.hour), Number(noonParts.minute));
+  const offsetMs = representedAsUtc - noonUtc.getTime();
+  return new Date(Date.UTC(year, month - 1, day) - offsetMs);
+}
+
 export function isLastMonday(date: Date) {
   const parts = etParts(date);
   if (parts.weekday !== "Mon") return false;
@@ -45,4 +57,3 @@ export function nextScheduledAt(jobType: AutomationJobType, from: Date) {
 }
 
 export const automationTimeZone = ZONE;
-

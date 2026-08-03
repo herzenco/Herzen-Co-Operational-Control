@@ -5,7 +5,8 @@ import { generatePair, planMonthlySlate } from "./generation";
 import { loadLearningContext } from "./learning-context";
 import { AnthropicJsonModel, OpenAIJsonModel } from "./models";
 import { createReviewLink } from "./review-links";
-import { nextMonthStart, nextScheduledAt } from "./schedule";
+import { buildCanonicalPackage, readyQaChecklist } from "./packages";
+import { etDayStart, nextMonthStart, nextScheduledAt } from "./schedule";
 import type { AutomationJobType, GeneratedAsset, PlannedTopic } from "./types";
 import { publishContent } from "./publishing";
 
@@ -45,7 +46,7 @@ async function createContentRecord(supabase: SupabaseClient, input: {
     reasoning_summary: input.asset.reasoning_summary,
     source_links: input.topic.source_links,
     audit_status: "pending",
-    metadata: { automation_phase: 1, content_role: input.platform === "website" ? "blog" : "linkedin_companion", website_url: input.websiteUrl || null, cta: input.topic.cta },
+    metadata: { automation_phase: 1, content_role: input.platform === "website" ? "blog" : "linkedin_companion", website_url: input.websiteUrl || null, planned_website_url: input.websiteUrl || null, cta: input.topic.cta },
   }).select("*").single();
   if (error || !data) throw new Error(error?.message || `Could not create ${input.platform} content.`);
   return data as DbRecord;
@@ -64,7 +65,10 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
     if (auditError) throw auditError;
     if (result.passed) {
       const reviewUrl = await createReviewLink(supabase, String(item.id));
-      const { error } = await supabase.from("content_items").update({ ...currentAsset, status: "ready_for_lupe", audit_status: "passed", audit_iteration_count: iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers, review_ready_at: new Date().toISOString(), review_url: reviewUrl }).eq("id", item.id);
+      const canonicalSnapshot = { ...currentAsset, source_links: topic.source_links };
+      const { error: assetSnapshotError } = await supabase.from("content_assets").update({ metadata: { canonical_snapshot: canonicalSnapshot, immutable: true, audit_iteration: iteration } }).eq("content_item_id", item.id).in("asset_role", ["source", "delivery"]).eq("is_current", true);
+      if (assetSnapshotError) throw assetSnapshotError;
+      const { error } = await supabase.from("content_items").update({ ...currentAsset, status: "ready_for_lupe", audit_status: "passed", audit_iteration_count: iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers, review_ready_at: new Date().toISOString(), review_url: reviewUrl, qa_checklist: readyQaChecklist() }).eq("id", item.id);
       if (error) throw error;
       await log(supabase, runId, "audit_passed", `${item.title} passed SEO and AEO gates.`, { content_item_id: item.id, iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, provider: result.provider });
       return { passed: true, iteration, review_url: reviewUrl };
@@ -78,7 +82,10 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
       return { passed: false, iteration, check_in_required: true };
     }
     const rewrite = await generatePair(writer, topic, context, result.rewrite_guidance);
+    const priorAsset = currentAsset;
     currentAsset = String((item.metadata as DbRecord)?.content_role) === "blog" ? rewrite.blog : rewrite.linkedin;
+    const { error: rewriteError } = await supabase.from("content_rewrite_iterations").insert({ content_item_id: item.id, iteration, prior_asset: priorAsset, rewritten_asset: currentAsset, audit_result: result, rewrite_guidance: result.rewrite_guidance });
+    if (rewriteError) throw rewriteError;
     await supabase.from("content_items").update({ title: currentAsset.title, body: currentAsset.body, caption: currentAsset.caption, slug: currentAsset.slug, seo_title: currentAsset.seo_title, meta_description: currentAsset.meta_description, reasoning_summary: currentAsset.reasoning_summary, audit_status: "failed", seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers }).eq("id", item.id);
   }
   return { passed: false, iteration };
@@ -97,7 +104,8 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
   if (generationError || !generationRun) throw generationError || new Error("Could not create the generation run.");
   const writer = new OpenAIJsonModel();
   const slate = await planMonthlySlate(writer, context, monthStart);
-  const timelyTopics = slate.topics.filter((topic) => topic.timely);
+  const pairLimit = Math.max(1, Number(configuration.pair_limit || 1));
+  const timelyTopics = slate.topics.filter((topic) => topic.timely).slice(0, pairLimit);
   await supabase.from("content_generation_runs").update({ status: "generating", planned_topics: slate }).eq("id", generationRun.id);
   const results = [];
   for (const topic of timelyTopics) {
@@ -108,6 +116,8 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
     await supabase.from("content_pairs").insert({ generation_run_id: generationRun.id, blog_content_item_id: blog.id, linkedin_content_item_id: linkedin.id, topic_key: topic.topic_key });
     await supabase.from("content_items").update({ paired_content_item_id: linkedin.id }).eq("id", blog.id);
     await supabase.from("content_items").update({ paired_content_item_id: blog.id }).eq("id", linkedin.id);
+    await buildCanonicalPackage(supabase, blog, topic, pair.blog, "website");
+    await buildCanonicalPackage(supabase, linkedin, topic, pair.linkedin, "linkedin");
     const blogAudit = await auditUntilGate(supabase, runId, blog, pair.blog, topic, context);
     const linkedinAudit = await auditUntilGate(supabase, runId, linkedin, pair.linkedin, topic, context);
     results.push({ topic: topic.title, blog: { id: blog.id, ...blogAudit }, linkedin: { id: linkedin.id, ...linkedinAudit } });
@@ -118,11 +128,12 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
   return { generation_run_id: generationRun.id, results, evergreen_fallbacks: slate.evergreen_fallbacks };
 }
 
-async function reviewDelivery(supabase: SupabaseClient, type: "weekly_review_pack" | "publish_day_notice", now: Date) {
-  const start = type === "weekly_review_pack" ? new Date(now) : new Date(now);
+async function reviewDelivery(supabase: SupabaseClient, type: "weekly_review_pack" | "publish_day_notice", now: Date, configuration: DbRecord) {
+  const property = await requireSingle(supabase.from("content_properties").select("id").eq("slug", String(configuration.property_slug || "herzen-co")).single(), "Herzen Co. property");
+  const start = etDayStart(now);
   const end = new Date(start);
-  if (type === "weekly_review_pack") end.setUTCDate(end.getUTCDate() + 7); else end.setUTCDate(end.getUTCDate() + 1);
-  const { data, error } = await supabase.from("content_items").select("id,title,review_url,status,publish_at").gte("publish_at", start.toISOString()).lt("publish_at", end.toISOString()).not("review_url", "is", null).order("publish_at");
+  end.setUTCDate(end.getUTCDate() + (type === "weekly_review_pack" ? 7 : 1));
+  const { data, error } = await supabase.from("content_items").select("id,title,review_url,status,publish_at").eq("property_id", property.id).gte("publish_at", start.toISOString()).lt("publish_at", end.toISOString()).not("review_url", "is", null).order("publish_at");
   if (error) throw error;
   const items = (data || []).map((item) => ({ title: item.title, review_url: item.review_url }));
   const unapproved = (data || []).some((item) => !["approved","scheduled","publishing","published"].includes(item.status));
@@ -144,7 +155,8 @@ async function runK2Refresh(supabase: SupabaseClient, configuration: DbRecord) {
 }
 
 async function runAuditRetry(supabase: SupabaseClient, runId: string) {
-  const { data, error } = await supabase.from("content_items").select("*").in("audit_status", ["pending","failed"]).lt("audit_iteration_count", 5).limit(10);
+  const property = await requireSingle(supabase.from("content_properties").select("id").eq("slug", "herzen-co").single(), "Herzen Co. property");
+  const { data, error } = await supabase.from("content_items").select("*").eq("property_id", property.id).contains("metadata", { automation_phase: 1 }).in("audit_status", ["pending","failed"]).lt("audit_iteration_count", 5).limit(10);
   if (error) throw error;
   const results = [];
   for (const item of data || []) {
@@ -178,7 +190,7 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
     await log(supabase, run.id, "run_started", `${jobType} started.`);
     let output: DbRecord;
     if (jobType === "monthly_generation") output = await runMonthlyGeneration(supabase, run.id, now, options.configuration || {});
-    else if (jobType === "weekly_review_pack" || jobType === "publish_day_notice") output = await reviewDelivery(supabase, jobType, now);
+    else if (jobType === "weekly_review_pack" || jobType === "publish_day_notice") output = await reviewDelivery(supabase, jobType, now, options.configuration || {});
     else if (jobType === "audit_retry") output = await runAuditRetry(supabase, run.id);
     else output = await runK2Refresh(supabase, options.configuration || {});
     await supabase.from("workflow_runs").update({ status: "succeeded", output, finished_at: new Date().toISOString() }).eq("id", run.id);

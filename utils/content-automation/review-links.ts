@@ -8,7 +8,7 @@ export async function createReviewLink(supabase: SupabaseClient, contentItemId: 
   const tokenHash = hashReviewToken(token);
   const { error } = await supabase.from("content_review_links").upsert({ content_item_id: contentItemId, token_hash: tokenHash, status: "active" }, { onConflict: "content_item_id" });
   if (error) throw error;
-  const origin = process.env.OCC_PUBLIC_URL || "http://localhost:3000";
+  const origin = process.env.OCC_PUBLIC_URL || "https://operations.herzenco.co";
   return `${origin}/review/content/${token}`;
 }
 
@@ -18,4 +18,3 @@ export async function resolveReviewLink(supabase: SupabaseClient, token: string)
   if (!data || (data.expires_at && new Date(data.expires_at) <= new Date())) return null;
   return data;
 }
-
