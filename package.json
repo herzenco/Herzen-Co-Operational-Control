@@ -18,6 +18,7 @@
     "@dagrejs/dagre": "3.0.0",
     "@supabase/ssr": "0.12.4",
     "@supabase/supabase-js": "2.111.0",
+    "@vercel/oidc": "^3.0.5",
     "@xyflow/react": "12.11.2",
     "drizzle-orm": "0.45.2",
     "next": "16.2.6",

@@ -64,6 +64,7 @@ test("cron-secret and tokenized review routes bypass browser-session redirects",
 
 test("writer and independent auditor can use Vercel deployment identity", () => {
   assert.match(models, /process\.env\.VERCEL_OIDC_TOKEN/);
+  assert.match(models, /getVercelOidcToken/);
   assert.match(models, /openai\/gpt-5\.6-terra/);
   assert.match(models, /anthropic\/claude-sonnet-4\.6/);
   assert.match(models, /ai-gateway\.vercel\.sh\/v1\/chat\/completions/);

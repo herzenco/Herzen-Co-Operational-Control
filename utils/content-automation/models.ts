@@ -1,4 +1,5 @@
 import type { JsonModel } from "./types";
+import { getVercelOidcToken } from "@vercel/oidc";
 
 function jsonFromText(value: string) {
   const fenced = value.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
@@ -6,7 +7,7 @@ function jsonFromText(value: string) {
 }
 
 async function gatewayJson<T>(model: string, system: string, prompt: string): Promise<T> {
-  const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+  const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || await getVercelOidcToken();
   if (!token) throw new Error("Vercel AI Gateway requires VERCEL_OIDC_TOKEN or AI_GATEWAY_API_KEY.");
   const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
     method: "POST",
