@@ -1,8 +1,11 @@
 import type { AuditResult, Auditor, GeneratedAsset, JsonModel } from "./types";
 
 function normalize(provider: "manus" | "anthropic", value: Omit<AuditResult, "provider" | "passed">): AuditResult {
-  const seo = Math.max(0, Math.min(100, Number(value.seo_score)));
-  const aeo = Math.max(0, Math.min(100, Number(value.aeo_score)));
+  const rawSeo = Number(value.seo_score);
+  const rawAeo = Number(value.aeo_score);
+  if (!Number.isFinite(rawSeo) || !Number.isFinite(rawAeo)) throw new Error(`${provider} audit returned invalid SEO/AEO scores.`);
+  const seo = Math.max(0, Math.min(100, Math.round(rawSeo)));
+  const aeo = Math.max(0, Math.min(100, Math.round(rawAeo)));
   return { ...value, provider, seo_score: seo, aeo_score: aeo, passed: seo >= 80 && aeo >= 80 };
 }
 
@@ -32,4 +35,3 @@ export function createAuditor(anthropicModel: JsonModel): Auditor {
   if (process.env.MANUS_AUDIT_URL && process.env.MANUS_API_KEY) return new ManusAuditor(process.env.MANUS_AUDIT_URL, process.env.MANUS_API_KEY);
   return new AnthropicAuditor(anthropicModel);
 }
-

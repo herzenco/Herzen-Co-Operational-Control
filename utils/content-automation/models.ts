@@ -6,7 +6,9 @@ function jsonFromText(value: string) {
   return JSON.parse(fenced || value);
 }
 
-async function gatewayJson<T>(model: string, system: string, prompt: string): Promise<T> {
+type JsonSchema = Record<string, unknown>;
+
+async function gatewayJson<T>(model: string, system: string, prompt: string, schema: JsonSchema = { type: "object", additionalProperties: true }): Promise<T> {
   const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN || await getVercelOidcToken();
   if (!token) throw new Error("Vercel AI Gateway requires VERCEL_OIDC_TOKEN or AI_GATEWAY_API_KEY.");
   const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
@@ -19,7 +21,7 @@ async function gatewayJson<T>(model: string, system: string, prompt: string): Pr
         type: "json",
         name: "occ_structured_output",
         description: "Structured JSON for the OCC content automation pipeline.",
-        schema: { type: "object", additionalProperties: true },
+        schema,
       },
     }),
   });
@@ -51,7 +53,18 @@ export class OpenAIJsonModel implements JsonModel {
 export class AnthropicJsonModel implements JsonModel {
   async generate<T>(system: string, prompt: string): Promise<T> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) return gatewayJson<T>(process.env.ANTHROPIC_AUDIT_MODEL || "anthropic/claude-sonnet-4.6", system, prompt);
+    if (!apiKey) return gatewayJson<T>(process.env.ANTHROPIC_AUDIT_MODEL || "anthropic/claude-sonnet-4.6", system, prompt, {
+      type: "object",
+      additionalProperties: false,
+      required: ["seo_score", "aeo_score", "summary", "blockers", "rewrite_guidance"],
+      properties: {
+        seo_score: { type: "integer", minimum: 0, maximum: 100 },
+        aeo_score: { type: "integer", minimum: 0, maximum: 100 },
+        summary: { type: "string" },
+        blockers: { type: "array", items: { type: "string" } },
+        rewrite_guidance: { type: "string" },
+      },
+    });
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },
