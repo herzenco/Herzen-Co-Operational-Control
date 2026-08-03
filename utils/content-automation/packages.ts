@@ -18,9 +18,9 @@ function instructions(platform: "website" | "linkedin") {
 }
 
 async function requireAgent(supabase: SupabaseClient, code: string) {
-  const { data, error } = await supabase.from("agents").select("id").ilike("code", code).limit(1).single();
-  if (error || !data) throw new Error(error?.message || `${code} agent was not found.`);
-  return String(data.id);
+  const { data, error } = await supabase.from("agents").select("id").ilike("code", code).limit(1);
+  if (error || !data?.[0]) throw new Error(error?.message || `${code} agent was not found.`);
+  return String(data[0].id);
 }
 
 export async function buildCanonicalPackage(supabase: SupabaseClient, item: DbRecord, topic: PlannedTopic, asset: GeneratedAsset, platform: "website" | "linkedin") {

@@ -35,6 +35,7 @@ test("review decisions synchronize the independent approval object", () => {
 
 test("canonical packages resolve normalized agent codes case-insensitively", () => {
   assert.match(packages, /\.ilike\("code", code\)/);
+  assert.doesNotMatch(packages, /ilike\("code", code\)\.limit\(1\)\.single/);
 });
 
 test("ET calendar boundaries remain correct across daylight saving changes", () => {
