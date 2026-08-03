@@ -67,8 +67,11 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!body) return fail(400, "invalid_json", "Send a JSON request body.");
   let payload: Record<string, unknown> = {
     ...pickFields(body, resource.createFields),
-    created_by: context.user.id,
+    ...(context.user ? { created_by: context.user.id } : {}),
   };
+  if (context.agentId && resourceName === "work-logs" && !payload.agent_id) payload.agent_id = context.agentId;
+  if (context.agentId && resourceName === "daily-updates" && !payload.agent_id) payload.agent_id = context.agentId;
+  if (context.agentId && resourceName === "approvals" && !payload.requested_by_agent_id) payload.requested_by_agent_id = context.agentId;
   if (resourceName === "content-items") {
     const normalized = normalizeContentWrite(payload);
     if (normalized.error) return fail(422, "unhosted_creative", normalized.error);
@@ -84,6 +87,15 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (error) {
     const status = error.code === "23505" ? 409 : 400;
     return fail(status, "write_failed", error.message, { postgres_code: error.code });
+  }
+  if (context.agentId) {
+    await context.supabase.from("activity_log").insert({
+      actor_user_id: null,
+      action: "agent_insert",
+      entity_type: resource.table,
+      entity_id: String(data.id),
+      after_data: { agent_id: context.agentId, credential_id: context.credentialId },
+    });
   }
   return ok(serializeApiResource(resourceName, data), { status: 201 });
 }

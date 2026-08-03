@@ -55,6 +55,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     if (["changes_requested", "declined"].includes(String(body.status)) && !String(body.decision_note || "").trim()) {
       return fail(422, "rejection_reason_required", "A written rejection reason is required for Lupe and the content owner.");
     }
+    if (!context.user) return fail(403, "human_approval_required", "Only a signed-in human operator can decide approvals.");
     payload.decided_by = context.user.id;
     payload.decided_at = new Date().toISOString();
   }
@@ -81,7 +82,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
         ? {
             status: body.schedule_content === true ? "scheduled" : "approved",
             approval_state: "approved",
-            approved_by: context.user.id,
+            approved_by: context.user!.id,
             approved_at: new Date().toISOString(),
             approval_id: data.id,
             package_manifest: canonicalContent ? {
@@ -124,6 +125,15 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     if (item) await context.supabase.from("content_items").update({ feedback_version: Number(item.feedback_version || 0) + 1 }).eq("id", data.content_item_id);
   }
 
+  if (context.agentId) {
+    await context.supabase.from("activity_log").insert({
+      actor_user_id: null,
+      action: "agent_update",
+      entity_type: resource.table,
+      entity_id: String(data.id),
+      after_data: { agent_id: context.agentId, credential_id: context.credentialId },
+    });
+  }
   return ok(serializeApiResource(resourceName, data));
 }
 
@@ -145,6 +155,15 @@ export async function DELETE(request: Request, { params }: RouteContext) {
     .select()
     .single();
   if (error || !data) return fail(409, "delete_failed", error?.message || "The record could not be deleted.");
+  if (context.agentId) {
+    await context.supabase.from("activity_log").insert({
+      actor_user_id: null,
+      action: "agent_delete",
+      entity_type: resource.table,
+      entity_id: String(data.id),
+      after_data: { agent_id: context.agentId, credential_id: context.credentialId },
+    });
+  }
   return ok({ deleted: data });
 }
 

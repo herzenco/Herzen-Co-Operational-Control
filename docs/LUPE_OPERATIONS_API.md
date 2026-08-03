@@ -5,8 +5,7 @@ operator control over the Operations Control Center.
 
 ## Security model
 
-- Lupe has a dedicated Supabase Auth identity: `lupe@herzenco.co`.
-- The API uses short-lived Supabase bearer tokens and renewable refresh tokens.
+- Human operators use short-lived Supabase sessions. Lupe uses a dedicated, revocable OCC machine key.
 - Every request is checked against `operations_members`.
 - Lupe is assigned the `operator` role with complete read and write access.
 - Anonymous database access is revoked.
@@ -15,8 +14,8 @@ operator control over the Operations Control Center.
 - Never put Lupe's password, access token, or refresh token in a URL, source
   file, log, issue, or chat transcript.
 
-Local credentials are stored only in `.env.local` and are intentionally ignored
-by Git. Production credentials should be placed in Lupe's secret manager.
+Lupe's plaintext machine key is stored only in its secret manager. See
+[`LUPE_MACHINE_AUTH_HANDOFF.md`](./LUPE_MACHINE_AUTH_HANDOFF.md).
 
 ## Base URLs
 
@@ -39,7 +38,15 @@ Live behavior verified on 2026-07-31:
   `Send a Supabase access token as Authorization: Bearer <token>.`
 - `https://operations.herzenco.co/login` is publicly reachable.
 
-## Authenticate
+## Authenticate Lupe
+
+Lupe sends its machine key directly. It does not exchange an email and password and does not refresh a browser session:
+
+```http
+Authorization: Bearer <OCC_API_KEY>
+```
+
+## Authenticate a human integration
 
 Exchange Lupe's company identity for a short-lived access token:
 

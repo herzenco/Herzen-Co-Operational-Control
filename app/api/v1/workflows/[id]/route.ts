@@ -23,7 +23,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (!parsed.success) return fail(422, "workflow_invalid", "The workflow definition is invalid.", { errors: parsed.errors });
   if (parsed.definition.id !== id) return fail(409, "id_mismatch", "The workflow definition id must match the URL id.");
 
-  const payload = workflowWritePayload(parsed.definition, context.user.id, false);
+  const payload = workflowWritePayload(parsed.definition, context.user!.id, false);
   const { data, error } = await context.supabase.from("workflows").update(payload).eq("id", id).select().single();
   if (error || !data) return fail(400, "write_failed", error?.message || "The workflow could not be updated.");
   return ok(data);
