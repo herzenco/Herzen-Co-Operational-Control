@@ -65,11 +65,13 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
   const writer = new OpenAIJsonModel();
   const auditor = createAuditor(new AnthropicJsonModel());
   let currentAsset = asset;
+  const contentRole = String((item.metadata as DbRecord)?.content_role || "");
+  const auditContext = { ...context, intended_platform: contentRole === "linkedin_companion" ? "linkedin" : "website_blog" };
   let iteration = Number(item.audit_iteration_count || 0);
   while (iteration < 10) {
     iteration += 1;
     await supabase.from("content_items").update({ audit_status: "running", audit_iteration_count: iteration }).eq("id", item.id);
-    const result = await auditor.audit(currentAsset, context);
+    const result = await auditor.audit(currentAsset, auditContext);
     const { error: auditError } = await supabase.from("content_audits").insert({ content_item_id: item.id, iteration, provider: result.provider, seo_score: result.seo_score, aeo_score: result.aeo_score, summary: result.summary, blockers: result.blockers, rewrite_guidance: result.rewrite_guidance, raw_response: result.raw_response || {} });
     if (auditError) throw auditError;
     if (result.passed) {
@@ -178,8 +180,9 @@ async function runK2Refresh(supabase: SupabaseClient, configuration: DbRecord) {
 
 async function runAuditRetry(supabase: SupabaseClient, runId: string, configuration: DbRecord = {}) {
   const property = await requireSingle(supabase.from("content_properties").select("id").eq("slug", "herzen-co").single(), "Herzen Co. property");
-  let retryQuery = supabase.from("content_items").select("*").eq("property_id", property.id).contains("metadata", { automation_phase: 1 }).in("audit_status", ["pending","failed"]).lt("audit_iteration_count", 5);
   const contentItemIds = Array.isArray(configuration.content_item_ids) ? configuration.content_item_ids.map(String) : [];
+  const iterationLimit = contentItemIds.length && configuration.continue_after_check_in === true ? 10 : 5;
+  let retryQuery = supabase.from("content_items").select("*").eq("property_id", property.id).contains("metadata", { automation_phase: 1 }).in("audit_status", ["pending","failed"]).lt("audit_iteration_count", iterationLimit);
   if (contentItemIds.length) retryQuery = retryQuery.in("id", contentItemIds);
   const { data, error } = await retryQuery.limit(Math.min(10, Math.max(1, Number(configuration.batch_size || 10))));
   if (error) throw error;

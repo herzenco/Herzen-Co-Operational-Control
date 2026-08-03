@@ -29,6 +29,7 @@ test("every failed rewrite is persisted and pilot generation is capped", () => {
   assert.match(migration, /create table public\.content_rewrite_iterations/);
   assert.match(runner, /content_rewrite_iterations/);
   assert.match(runner, /pair_limit \|\| 1/);
+  assert.match(runner, /intended_platform: contentRole === "linkedin_companion" \? "linkedin" : "website_blog"/);
 });
 
 test("a passing rewrite refreshes the canonical package manifest", () => {

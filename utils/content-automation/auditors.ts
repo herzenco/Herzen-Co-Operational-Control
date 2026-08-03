@@ -24,7 +24,7 @@ export class AnthropicAuditor implements Auditor {
   constructor(private model: JsonModel) {}
   async audit(asset: GeneratedAsset, context: Record<string, unknown>) {
     const result = await this.model.generate<Omit<AuditResult, "provider" | "passed">>(
-      "You audit founder-led B2B content. Return JSON with seo_score, aeo_score, summary, blockers, rewrite_guidance. Score SEO and AEO separately and rigorously.",
+      "You audit founder-led B2B content. Return JSON with seo_score, aeo_score, summary, blockers, rewrite_guidance. Score SEO and AEO separately and rigorously within the asset's intended platform. For LinkedIn, score platform discoverability, semantic relevance, and answer extractability; do not require website-only schema markup or long-form page structure.",
       JSON.stringify({ asset, context, hard_rules: { min_scores: 80, politics: false, unapproved_promotions: false } }),
     );
     return normalize(this.name, result);
