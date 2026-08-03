@@ -30,6 +30,11 @@ test("every failed rewrite is persisted and pilot generation is capped", () => {
   assert.match(runner, /pair_limit \|\| 1/);
 });
 
+test("a passing rewrite refreshes the canonical package manifest", () => {
+  assert.match(runner, /package_manifest: packageManifest/);
+  assert.match(runner, /caption: currentAsset\.caption \|\| currentAsset\.body/);
+});
+
 test("automated queues are property scoped", () => {
   assert.match(runner, /eq\("property_id", property\.id\)/);
   assert.match(runner, /contains\("metadata", \{ automation_phase: 1 \}\)/);

@@ -74,10 +74,18 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
     if (auditError) throw auditError;
     if (result.passed) {
       const reviewUrl = await createReviewLink(supabase, String(item.id));
+      const { data: packagedItem, error: packageReadError } = await supabase.from("content_items").select("package_manifest,source_asset_id,delivery_asset_id").eq("id", item.id).single();
+      if (packageReadError || !packagedItem) throw packageReadError || new Error("Canonical package manifest was not found.");
+      const packageManifest = {
+        ...((packagedItem.package_manifest as DbRecord) || {}),
+        caption: currentAsset.caption || currentAsset.body,
+        source_asset_id: packagedItem.source_asset_id,
+        delivery_asset_id: packagedItem.delivery_asset_id,
+      };
       const canonicalSnapshot = { ...currentAsset, source_links: topic.source_links };
       const { error: assetSnapshotError } = await supabase.from("content_assets").update({ metadata: { canonical_snapshot: canonicalSnapshot, immutable: true, audit_iteration: iteration } }).eq("content_item_id", item.id).in("asset_role", ["source", "delivery"]).eq("is_current", true);
       if (assetSnapshotError) throw assetSnapshotError;
-      const { error } = await supabase.from("content_items").update({ ...currentAsset, status: "ready_for_lupe", audit_status: "passed", audit_iteration_count: iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers, review_ready_at: new Date().toISOString(), review_url: reviewUrl, qa_checklist: readyQaChecklist() }).eq("id", item.id);
+      const { error } = await supabase.from("content_items").update({ ...currentAsset, package_manifest: packageManifest, status: "ready_for_lupe", audit_status: "passed", audit_iteration_count: iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers, review_ready_at: new Date().toISOString(), review_url: reviewUrl, qa_checklist: readyQaChecklist() }).eq("id", item.id);
       if (error) throw error;
       await log(supabase, runId, "audit_passed", `${item.title} passed SEO and AEO gates.`, { content_item_id: item.id, iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, provider: result.provider });
       return { passed: true, iteration, review_url: reviewUrl };
