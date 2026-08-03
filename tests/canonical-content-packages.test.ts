@@ -9,6 +9,7 @@ const runner = readFileSync(new URL("../utils/content-automation/runner.ts", imp
 const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
 const packages = readFileSync(new URL("../utils/content-automation/packages.ts", import.meta.url), "utf8");
 const gateExecutionMigration = readFileSync(new URL("../supabase/migrations/20260803225500_fix_phase1_gate_execution.sql", import.meta.url), "utf8");
+const canonicalResearchMigration = readFileSync(new URL("../supabase/migrations/20260803230500_accept_canonical_k2_research.sql", import.meta.url), "utf8");
 
 test("Phase 1 ready state requires the complete canonical package", () => {
   for (const requirement of ["paired_content_item_id", "research_record_id", "source_asset_id", "delivery_asset_id", "posting_instructions", "approval_id", "review_url", "herzen_phase1_qa_passes"]) {
@@ -33,6 +34,12 @@ test("every failed rewrite is persisted and pilot generation is capped", () => {
 test("a passing rewrite refreshes the canonical package manifest", () => {
   assert.match(runner, /package_manifest: packageManifest/);
   assert.match(runner, /caption: currentAsset\.caption \|\| currentAsset\.body/);
+});
+
+test("C-3PO readiness accepts a verified canonical K2 research record", () => {
+  assert.match(canonicalResearchMigration, /research\.id = new\.research_record_id/);
+  assert.match(canonicalResearchMigration, /research\.status = 'final'/);
+  assert.match(canonicalResearchMigration, /and not has_final_canonical_research/);
 });
 
 test("automated queues are property scoped", () => {
