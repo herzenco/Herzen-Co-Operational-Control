@@ -7,6 +7,7 @@ import { isLastMonday, nextMonthStart, shouldRun } from "../utils/content-automa
 const migration = readFileSync(new URL("../supabase/migrations/20260803103000_content_automation_phase1.sql", import.meta.url), "utf8");
 const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
 const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
+const middleware = readFileSync(new URL("../utils/supabase/middleware.ts", import.meta.url), "utf8");
 
 test("Phase 1 persists execution, pairs, audits, reviews, delivery, and publishing", () => {
   for (const table of ["content_generation_runs","content_pairs","content_audits","content_review_links","content_review_events","automation_schedules","workflow_runs","workflow_run_logs","content_delivery_jobs","content_publish_jobs"]) {
@@ -53,3 +54,9 @@ test("weekly and day-of deliveries are titles and links only", () => {
   assert.match(runner, /heads_up/);
 });
 
+test("cron-secret and tokenized review routes bypass browser-session redirects", () => {
+  assert.match(middleware, /\/api\/cron\/content-automation/);
+  assert.match(middleware, /\/api\/review\/content/);
+  assert.match(middleware, /\/review\/content\//);
+  assert.match(middleware, /isOperationsApi \|\| isPublicAutomationRoute/);
+});
