@@ -5,10 +5,27 @@ function jsonFromText(value: string) {
   return JSON.parse(fenced || value);
 }
 
+async function gatewayJson<T>(model: string, system: string, prompt: string): Promise<T> {
+  const token = process.env.AI_GATEWAY_API_KEY || process.env.VERCEL_OIDC_TOKEN;
+  if (!token) throw new Error("Vercel AI Gateway requires VERCEL_OIDC_TOKEN or AI_GATEWAY_API_KEY.");
+  const response = await fetch("https://ai-gateway.vercel.sh/v1/chat/completions", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: "system", content: system }, { role: "user", content: prompt }],
+      response_format: { type: "json_object" },
+    }),
+  });
+  if (!response.ok) throw new Error(`AI Gateway request failed (${response.status}): ${await response.text()}`);
+  const payload = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+  return jsonFromText(payload.choices?.[0]?.message?.content || "") as T;
+}
+
 export class OpenAIJsonModel implements JsonModel {
   async generate<T>(system: string, prompt: string): Promise<T> {
     const apiKey = process.env.OPENAI_API_KEY;
-    if (!apiKey) throw new Error("OPENAI_API_KEY is required for content generation.");
+    if (!apiKey) return gatewayJson<T>(process.env.OPENAI_CONTENT_MODEL || "openai/gpt-5.6-terra", system, prompt);
     const response = await fetch("https://api.openai.com/v1/responses", {
       method: "POST",
       headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
@@ -28,7 +45,7 @@ export class OpenAIJsonModel implements JsonModel {
 export class AnthropicJsonModel implements JsonModel {
   async generate<T>(system: string, prompt: string): Promise<T> {
     const apiKey = process.env.ANTHROPIC_API_KEY;
-    if (!apiKey) throw new Error("ANTHROPIC_API_KEY is required when Manus auditing is unavailable.");
+    if (!apiKey) return gatewayJson<T>(process.env.ANTHROPIC_AUDIT_MODEL || "anthropic/claude-sonnet-4.6", system, prompt);
     const response = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": apiKey, "anthropic-version": "2023-06-01", "Content-Type": "application/json" },

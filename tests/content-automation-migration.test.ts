@@ -8,6 +8,7 @@ const migration = readFileSync(new URL("../supabase/migrations/20260803103000_co
 const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
 const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
 const middleware = readFileSync(new URL("../utils/supabase/middleware.ts", import.meta.url), "utf8");
+const models = readFileSync(new URL("../utils/content-automation/models.ts", import.meta.url), "utf8");
 
 test("Phase 1 persists execution, pairs, audits, reviews, delivery, and publishing", () => {
   for (const table of ["content_generation_runs","content_pairs","content_audits","content_review_links","content_review_events","automation_schedules","workflow_runs","workflow_run_logs","content_delivery_jobs","content_publish_jobs"]) {
@@ -59,4 +60,11 @@ test("cron-secret and tokenized review routes bypass browser-session redirects",
   assert.match(middleware, /\/api\/review\/content/);
   assert.match(middleware, /\/review\/content\//);
   assert.match(middleware, /isOperationsApi \|\| isPublicAutomationRoute/);
+});
+
+test("writer and independent auditor can use Vercel deployment identity", () => {
+  assert.match(models, /process\.env\.VERCEL_OIDC_TOKEN/);
+  assert.match(models, /openai\/gpt-5\.6-terra/);
+  assert.match(models, /anthropic\/claude-sonnet-4\.6/);
+  assert.match(models, /ai-gateway\.vercel\.sh\/v1\/chat\/completions/);
 });
