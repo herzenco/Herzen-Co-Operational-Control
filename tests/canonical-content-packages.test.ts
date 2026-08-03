@@ -7,6 +7,7 @@ import { etDayStart } from "../utils/content-automation/schedule";
 const migration = readFileSync(new URL("../supabase/migrations/20260803190000_canonical_content_packages.sql", import.meta.url), "utf8");
 const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
 const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
+const packages = readFileSync(new URL("../utils/content-automation/packages.ts", import.meta.url), "utf8");
 
 test("Phase 1 ready state requires the complete canonical package", () => {
   for (const requirement of ["paired_content_item_id", "research_record_id", "source_asset_id", "delivery_asset_id", "posting_instructions", "approval_id", "review_url", "herzen_phase1_qa_passes"]) {
@@ -30,6 +31,10 @@ test("review decisions synchronize the independent approval object", () => {
   assert.match(reviewRoute, /currentItem\?\.approval_id/);
   assert.match(reviewRoute, /from\("approvals"\)\.update/);
   assert.doesNotMatch(reviewRoute, /approval_state: action === "declined" \? "rejected"/);
+});
+
+test("canonical packages resolve normalized agent codes case-insensitively", () => {
+  assert.match(packages, /\.ilike\("code", code\)/);
 });
 
 test("ET calendar boundaries remain correct across daylight saving changes", () => {

@@ -18,7 +18,7 @@ function instructions(platform: "website" | "linkedin") {
 }
 
 async function requireAgent(supabase: SupabaseClient, code: string) {
-  const { data, error } = await supabase.from("agents").select("id").eq("code", code).single();
+  const { data, error } = await supabase.from("agents").select("id").ilike("code", code).limit(1).single();
   if (error || !data) throw new Error(error?.message || `${code} agent was not found.`);
   return String(data.id);
 }
