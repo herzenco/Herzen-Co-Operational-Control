@@ -38,11 +38,15 @@ test("deliverable readiness reports every unresolved canonical requirement", () 
     "delivery_asset_missing",
     "posting_instructions_missing",
     "approval_missing",
+    "k2_research_final_missing",
+    "approval_request_missing",
+    "qa_checklist_incomplete",
     "required_feedback_unresolved",
   ]);
   assert.deepEqual(deliverableBlockers({
     caption: "Final copy", source_asset_id: "source", delivery_asset_id: "delivery",
-    posting_instructions: "Publish at 9", approval_state: "approved",
+    posting_instructions: "Publish at 9", approval_state: "approved", research_record_id: "research", approval_id: "approval",
+    qa_checklist: { image_matches_assigned_day: true, bordered_monthly_source_export: true, caption_matches_image: true, k2_feed_fit_note_present: true, hashtags_within_limit: true, suggested_posting_time_present: true, whatsapp_packet_matches_occ: true },
   }, [{ required: true, status: "applied" }]), []);
 });
 
