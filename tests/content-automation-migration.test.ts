@@ -43,6 +43,11 @@ test("runner rewrites failures and triggers a Lupe check-in every five attempts"
   assert.match(runner, /delivery_type: "lupe_check_in"/);
 });
 
+test("an explicitly approved pilot can promote one evergreen fallback", () => {
+  assert.match(runner, /allow_evergreen_fallback === true/);
+  assert.match(runner, /promoteEvergreenFallback/);
+});
+
 test("review decisions remain asset-specific and independently queue publishing", () => {
   assert.match(reviewRoute, /eq\("id", link\.content_item_id\)/);
   assert.match(reviewRoute, /content_publish_jobs/);

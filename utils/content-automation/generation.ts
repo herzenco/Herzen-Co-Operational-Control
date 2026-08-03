@@ -18,6 +18,13 @@ export async function planMonthlySlate(model: JsonModel, context: Record<string,
   );
 }
 
+export async function promoteEvergreenFallback(model: JsonModel, fallback: { title: string; rationale: string }, context: Record<string, unknown>, monthStart: string) {
+  return model.generate<PlannedTopic>(
+    `You are K2, Herzen Co.'s research strategist. ${VOICE} Turn the approved evergreen fallback into one complete pilot topic. Return only the required structured fields and set timely to false.`,
+    JSON.stringify({ fallback, month_start: monthStart, context, required_topic_fields: ["topic_key","title","rationale","timely","target_audience","conversion_goal","cta","publish_at","source_links"] }),
+  );
+}
+
 export async function generatePair(model: JsonModel, topic: PlannedTopic, context: Record<string, unknown>, rewriteGuidance = "") {
   const pair = await model.generate<GenerationPair>(
     `Write a publication-ready website blog and LinkedIn companion as separate assets. ${VOICE} Blog length is 400-1500 words. The LinkedIn post must include the supplied website URL. No image generation. Return JSON with blog and linkedin objects containing title, body, caption, slug, seo_title, meta_description, reasoning_summary.`,

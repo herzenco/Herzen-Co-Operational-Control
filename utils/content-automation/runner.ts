@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { createAuditor } from "./auditors";
 import { sendLupeDelivery, titlesAndLinksOnly } from "./delivery";
-import { generatePair, planMonthlySlate } from "./generation";
+import { generatePair, planMonthlySlate, promoteEvergreenFallback } from "./generation";
 import { loadLearningContext } from "./learning-context";
 import { AnthropicJsonModel, OpenAIJsonModel } from "./models";
 import { createReviewLink } from "./review-links";
@@ -105,10 +105,13 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
   const writer = new OpenAIJsonModel();
   const slate = await planMonthlySlate(writer, context, monthStart);
   const pairLimit = Math.max(1, Number(configuration.pair_limit || 1));
-  const timelyTopics = slate.topics.filter((topic) => topic.timely).slice(0, pairLimit);
+  let selectedTopics = slate.topics.filter((topic) => topic.timely).slice(0, pairLimit);
+  if (!selectedTopics.length && configuration.allow_evergreen_fallback === true && slate.evergreen_fallbacks[0]) {
+    selectedTopics = [await promoteEvergreenFallback(writer, slate.evergreen_fallbacks[0], context, monthStart)];
+  }
   await supabase.from("content_generation_runs").update({ status: "generating", planned_topics: slate }).eq("id", generationRun.id);
   const results = [];
-  for (const topic of timelyTopics) {
+  for (const topic of selectedTopics) {
     const pair = await generatePair(writer, topic, context);
     const websiteUrl = `${process.env.HERZEN_WEBSITE_URL || "https://herzen.co"}/${pair.blog.slug}`;
     const blog = await createContentRecord(supabase, { propertyId: String(property.id), channelId: String(websiteChannel.id), generationRunId: String(generationRun.id), topic, asset: pair.blog, platform: "website" });
