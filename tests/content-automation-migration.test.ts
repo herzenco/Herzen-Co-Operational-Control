@@ -45,6 +45,7 @@ test("runner rewrites failures and triggers a Lupe check-in every five attempts"
 
 test("an explicitly approved pilot can promote one evergreen fallback", () => {
   assert.match(runner, /allow_evergreen_fallback === true/);
+  assert.match(runner, /completeEvergreenTopic/);
   assert.match(runner, /promoteEvergreenFallback/);
 });
 

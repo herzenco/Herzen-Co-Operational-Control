@@ -106,8 +106,10 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
   const slate = await planMonthlySlate(writer, context, monthStart);
   const pairLimit = Math.max(1, Number(configuration.pair_limit || 1));
   let selectedTopics = slate.topics.filter((topic) => topic.timely).slice(0, pairLimit);
-  if (!selectedTopics.length && configuration.allow_evergreen_fallback === true && slate.evergreen_fallbacks[0]) {
-    selectedTopics = [await promoteEvergreenFallback(writer, slate.evergreen_fallbacks[0], context, monthStart)];
+  if (!selectedTopics.length && configuration.allow_evergreen_fallback === true) {
+    const completeEvergreenTopic = slate.topics.find((topic) => !topic.timely);
+    if (completeEvergreenTopic) selectedTopics = [completeEvergreenTopic];
+    else if (slate.evergreen_fallbacks?.[0]) selectedTopics = [await promoteEvergreenFallback(writer, slate.evergreen_fallbacks[0], context, monthStart)];
   }
   await supabase.from("content_generation_runs").update({ status: "generating", planned_topics: slate }).eq("id", generationRun.id);
   const results = [];
