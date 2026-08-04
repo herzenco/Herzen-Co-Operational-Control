@@ -75,4 +75,5 @@ test("the worker sends the approved payload and audits each provider attempt", (
   assert.doesNotMatch(publishing, /meta_description: item\.meta_description/);
   assert.match(runner, /content_publish_attempts/);
   assert.match(runner, /Recovered a stale publishing lease/);
+  assert.match(runner, /runDueSchedules[\s\S]*runPublishQueue\(supabase, now\)/);
 });

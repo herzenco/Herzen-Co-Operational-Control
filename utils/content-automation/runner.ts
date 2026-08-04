@@ -192,7 +192,10 @@ async function runAuditRetry(supabase: SupabaseClient, runId: string, configurat
     const asset = { title: item.title, body: item.body, caption: item.caption, slug: item.slug, seo_title: item.seo_title, meta_description: item.meta_description, reasoning_summary: item.reasoning_summary } as GeneratedAsset;
     results.push(await auditUntilGate(supabase, runId, item, asset, topic, {}, iterationLimit));
   }
-  const publishNow = new Date();
+  return { retried: results.length, results };
+}
+
+export async function runPublishQueue(supabase: SupabaseClient, publishNow = new Date()) {
   const stalePublishingAt = new Date(publishNow.getTime() - 15 * 60_000).toISOString();
   await supabase.from("content_publish_jobs").update({ status: "failed", retryable: true, next_attempt_at: publishNow.toISOString(), failure_message: "Recovered a stale publishing lease." }).eq("status", "publishing").or(`last_request_at.is.null,last_request_at.lt.${stalePublishingAt}`);
   const { data: publishJobs, error: publishError } = await supabase.from("content_publish_jobs").select("*,content_items(*)").or(`status.eq.queued,and(status.eq.failed,retryable.eq.true,next_attempt_at.lte.${publishNow.toISOString()})`).lte("scheduled_for", publishNow.toISOString()).order("scheduled_for").limit(10);
@@ -233,7 +236,7 @@ async function runAuditRetry(supabase: SupabaseClient, runId: string, configurat
       }
     }
   }
-  return { retried: results.length, results, published };
+  return published;
 }
 
 export async function executeAutomationJob(supabase: SupabaseClient, jobType: AutomationJobType, options: { now?: Date; configuration?: DbRecord; scheduleId?: string; scheduledFor?: string } = {}) {
@@ -260,6 +263,7 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
 }
 
 export async function runDueSchedules(supabase: SupabaseClient, now = new Date()) {
+  const published = await runPublishQueue(supabase, now);
   const { data: retries, error: retryError } = await supabase.from("workflow_runs").select("*").eq("status", "retrying").lte("retry_at", now.toISOString()).lt("attempt", 5).order("retry_at");
   if (retryError) throw retryError;
   const retryResults = [];
@@ -279,5 +283,5 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
     try { results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, configuration: schedule.configuration, scheduleId: schedule.id, scheduledFor })); }
     catch (failure) { results.push({ status: "retrying", job_type: schedule.job_type, error: automationErrorMessage(failure, "Scheduled run failed.") }); }
   }
-  return [...retryResults, ...results];
+  return [{ status: "publication_queue", published }, ...retryResults, ...results];
 }
