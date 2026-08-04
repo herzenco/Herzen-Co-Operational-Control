@@ -20,6 +20,9 @@ test("agent keys use the server client and fail closed without server configurat
   assert.match(auth, /createHash\("sha256"\)/);
   assert.match(auth, /SUPABASE_SECRET_KEY \|\| process\.env\.SUPABASE_SERVICE_ROLE_KEY/);
   assert.match(auth, /Agent authentication is not configured on this deployment/);
+  assert.doesNotMatch(auth, /LUPE_API_TOKEN/);
+  assert.doesNotMatch(auth, /timingSafeEqual/);
+  assert.doesNotMatch(auth, /buildServiceUser/);
 });
 
 test("machine writes are scope-limited and cannot decide human approvals", () => {

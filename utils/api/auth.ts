@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash } from "node:crypto";
 import { createClient, type SupabaseClient, type User } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import { apiHeaders } from "./responses";
@@ -29,8 +29,6 @@ type AgentCredentialRow = {
   agent: { code: string; name: string; status: string } | null;
 };
 
-const DEFAULT_OPERATOR_USER_ID = "d550bf69-3af7-40da-a890-ff0138b17e62";
-
 function unauthorized(message: string, status = 401) {
   return NextResponse.json(
     { error: { code: status === 401 ? "unauthorized" : "forbidden", message } },
@@ -51,34 +49,11 @@ export function createApiClient(accessToken?: string) {
   );
 }
 
-function createServiceRoleClient() {
+function createAgentApiClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !serviceRoleKey) return null;
-
-  return createClient(
-    url,
-    serviceRoleKey,
-    { auth: { persistSession: false, autoRefreshToken: false } },
-  );
-}
-
-function tokensMatch(expected: string | undefined, received: string | undefined) {
-  if (!expected || !received) return false;
-  const expectedBuffer = Buffer.from(expected);
-  const receivedBuffer = Buffer.from(received);
-  if (expectedBuffer.length !== receivedBuffer.length) return false;
-  return timingSafeEqual(expectedBuffer, receivedBuffer);
-}
-
-function buildServiceUser(userId: string, email?: string) {
-  return {
-    id: userId,
-    aud: "authenticated",
-    role: "authenticated",
-    email,
-    created_at: new Date(0).toISOString(),
-  } as User;
+  const key = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!url || !key) return null;
+  return createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
 }
 
 function hasScope(scopes: string[] | null, scope: string) {
@@ -89,7 +64,7 @@ async function authenticateAgentKey(
   accessToken: string,
   options: { write?: boolean; allowAgentWrite?: boolean },
 ): Promise<ApiContext | NextResponse> {
-  const serviceClient = createServiceRoleClient();
+  const serviceClient = createAgentApiClient();
   if (!serviceClient) return unauthorized("Agent authentication is not configured on this deployment.", 503);
 
   const secretHash = createHash("sha256").update(accessToken, "utf8").digest("hex");
@@ -109,11 +84,7 @@ async function authenticateAgentKey(
     return unauthorized("This agent credential cannot perform that write.", 403);
   }
 
-  await serviceClient
-    .from("agent_api_credentials")
-    .update({ last_used_at: new Date().toISOString() })
-    .eq("id", credential.id);
-
+  await serviceClient.from("agent_api_credentials").update({ last_used_at: new Date().toISOString() }).eq("id", credential.id);
   return {
     supabase: serviceClient,
     user: null,
@@ -138,40 +109,6 @@ export async function requireMember(
 
   if (scheme?.toLowerCase() !== "bearer" || !accessToken) {
     return unauthorized("Send an OCC agent key or Supabase access token as Authorization: Bearer <token>.");
-  }
-
-  if (tokensMatch(process.env.LUPE_API_TOKEN, accessToken)) {
-    const supabase = createServiceRoleClient();
-    if (!supabase) {
-      return unauthorized("The Lupe API token is configured, but the service-role client is not available.");
-    }
-
-    const userId = process.env.LUPE_OPERATIONS_USER_ID || DEFAULT_OPERATOR_USER_ID;
-    const {
-      data: member,
-      error: memberError,
-    } = await supabase
-      .from("operations_members")
-      .select("user_id,display_name,role,active,permissions")
-      .eq("user_id", userId)
-      .eq("active", true)
-      .single();
-
-    if (memberError || !member) {
-      return unauthorized("The Lupe API token could not be mapped to an active Operations Control member.", 403);
-    }
-
-    if (options.write && !["owner", "operator"].includes(member.role)) {
-      return unauthorized("This identity does not have write access.", 403);
-    }
-
-    return {
-      supabase,
-      user: buildServiceUser(member.user_id, process.env.LUPE_API_EMAIL),
-      member: member as OperationsMember,
-      agentId: null,
-      credentialId: null,
-    };
   }
 
   if (accessToken.startsWith("occ_agent_")) return authenticateAgentKey(accessToken, options);
@@ -201,13 +138,7 @@ export async function requireMember(
     return unauthorized("This identity does not have write access.", 403);
   }
 
-  return {
-    supabase,
-    user,
-    member: member as OperationsMember,
-    agentId: null,
-    credentialId: null,
-  };
+  return { supabase, user, member: member as OperationsMember, agentId: null, credentialId: null };
 }
 
 export function isApiError(
