@@ -1,0 +1,1188 @@
+@import url("https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500&family=Space+Grotesk:wght@300;400;500;600&display=swap");
+
+:root {
+  --void: #01040a;
+  --field: #020610;
+  --rail: rgba(4, 11, 20, 0.78);
+  --panel: rgba(10, 26, 42, 0.56);
+  --panel2: rgba(24, 58, 90, 0.38);
+  --paper: #e8f7ff;
+  --dim: #93bfd8;
+  --muted: #5488a6;
+  --live: #7fd4ff;
+  --brand: #3aa9ff;
+  --deep: #0c79d8;
+  --warn: #ffb020;
+  --danger: #ff5470;
+  --ok: #3ddc97;
+  --rule: rgba(90, 190, 255, 0.16);
+  --soft: rgba(90, 190, 255, 0.1);
+  --edge: rgba(104, 196, 255, 0.85);
+  --serif: "Space Grotesk", system-ui, sans-serif;
+  --sans: "Space Grotesk", system-ui, sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, monospace;
+  --bloom: 0 0 10px rgba(127, 212, 255, 0.55);
+  --bloom-soft: 0 0 6px rgba(127, 212, 255, 0.4);
+}
+
+html,
+body {
+  min-height: 100%;
+  background: var(--field);
+}
+
+body {
+  position: relative;
+  overflow-x: hidden;
+  font-family: var(--sans);
+}
+
+body::before,
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+body::before {
+  z-index: 0;
+  background-image:
+    linear-gradient(rgba(90, 190, 255, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(90, 190, 255, 0.055) 1px, transparent 1px),
+    radial-gradient(130% 90% at 50% -15%, rgba(58, 169, 255, 0.22), transparent 58%),
+    radial-gradient(100% 80% at 50% 115%, rgba(12, 121, 216, 0.1), transparent 60%),
+    radial-gradient(70% 70% at 50% 50%, transparent 55%, rgba(1, 4, 10, 0.88) 100%);
+  background-size: 52px 52px, 52px 52px, auto, auto, auto;
+  mask-image: radial-gradient(120% 100% at 50% 0%, #000 20%, rgba(0, 0, 0, 0.3) 78%);
+}
+
+body::after {
+  z-index: 100;
+  background: repeating-linear-gradient(180deg, rgba(127, 212, 255, 0.025) 0 1px, transparent 1px 3px);
+  mix-blend-mode: screen;
+}
+
+::selection {
+  background: rgba(58, 169, 255, 0.32);
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(90, 190, 255, 0.22);
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@keyframes aegis-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes aegis-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.34; transform: scale(0.78); }
+}
+
+.deck,
+.companyLogin,
+.publicReviewPage,
+.opsShell {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.deck {
+  grid-template-columns: 244px minmax(0, 1fr);
+}
+
+.deck::before {
+  content: "";
+  position: fixed;
+  z-index: -1;
+  top: 50%;
+  left: 58%;
+  width: min(1180px, 88vw);
+  aspect-ratio: 1;
+  border: 1px solid rgba(104, 196, 255, 0.12);
+  border-radius: 50%;
+  translate: -50% -50%;
+  background:
+    radial-gradient(circle, transparent 0 19%, rgba(104, 196, 255, 0.1) 19.15% 19.35%, transparent 19.5% 31%, rgba(104, 196, 255, 0.08) 31.15% 31.35%, transparent 31.5% 43%, rgba(104, 196, 255, 0.09) 43.15% 43.3%, transparent 43.45%),
+    conic-gradient(from 8deg, transparent 0 7deg, rgba(104, 196, 255, 0.15) 7.2deg 7.6deg, transparent 7.8deg 31deg, rgba(104, 196, 255, 0.12) 31.2deg 31.6deg, transparent 31.8deg 90deg);
+  opacity: 0.55;
+  animation: aegis-spin 180s linear infinite;
+  pointer-events: none;
+}
+
+/* Rail and command chrome */
+.rail {
+  width: 244px;
+  background: linear-gradient(180deg, rgba(4, 12, 22, 0.82), rgba(1, 5, 11, 0.8));
+  border-right: 0;
+  box-shadow: inset -1px 0 0 var(--soft), 1px 0 30px rgba(0, 0, 0, 0.44);
+  backdrop-filter: blur(12px);
+}
+
+.deckMain {
+  grid-column: 2;
+  position: relative;
+  min-width: 0;
+}
+
+.deckBrand {
+  padding: 24px 20px 20px;
+  gap: 14px;
+}
+
+.deckBrand img {
+  width: 142px;
+  filter: drop-shadow(0 0 8px rgba(127, 212, 255, 0.18));
+}
+
+.deckBrand span,
+.railLabel {
+  color: var(--muted);
+  font: 400 9.5px var(--mono);
+  letter-spacing: 0.22em;
+}
+
+.rule {
+  background: var(--soft);
+}
+
+.deckNav {
+  padding: 14px 10px;
+  gap: 2px;
+}
+
+.deckNav button {
+  position: relative;
+  grid-template-columns: 4px 1fr auto;
+  gap: 13px;
+  padding: 12px 13px;
+  border-radius: 0;
+  color: var(--muted);
+  font: 400 10.5px var(--mono);
+  letter-spacing: 0.18em;
+}
+
+.deckNav button:hover {
+  color: var(--dim);
+  background: rgba(58, 169, 255, 0.05);
+}
+
+.deckNav button.active {
+  color: var(--live);
+  background: linear-gradient(90deg, rgba(58, 169, 255, 0.2), transparent 85%);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.18);
+  text-shadow: var(--bloom);
+}
+
+.deckNav button.active::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 2px;
+  background: var(--live);
+  box-shadow: 0 0 12px var(--live);
+}
+
+.deckNav button.active i,
+.roster button > i.online {
+  background: var(--live);
+  box-shadow: 0 0 9px var(--live), 0 0 18px rgba(127, 212, 255, 0.45);
+}
+
+.deckNav em {
+  color: #356b8a;
+  font-size: 9.5px;
+}
+
+.deckNav button.active em {
+  color: var(--live);
+}
+
+.roster {
+  padding: 18px 20px 22px;
+  border-color: var(--soft);
+}
+
+.roster > button {
+  grid-template-columns: 26px 1fr 6px;
+  gap: 11px;
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: 12.5px;
+}
+
+.roster > button:hover {
+  color: var(--paper);
+}
+
+.roster p {
+  padding-top: 13px;
+  border-top: 1px solid var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.agentMark {
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 0;
+  color: var(--live);
+  background: rgba(58, 169, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.35);
+  font: 400 9px var(--mono);
+  letter-spacing: 0.08em;
+  text-shadow: var(--bloom-soft);
+}
+
+.agentMark.large {
+  width: 52px;
+  height: 52px;
+  font-size: 12px;
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.55), 0 0 22px rgba(58, 169, 255, 0.18);
+}
+
+.deckHeader {
+  padding: 20px 30px 0;
+  border-bottom: 0;
+  background: linear-gradient(180deg, rgba(2, 7, 14, 0.96), rgba(2, 7, 14, 0.76));
+  backdrop-filter: blur(14px);
+  box-shadow: inset 0 -1px 0 var(--soft);
+}
+
+.deckHeader::after {
+  content: "";
+  position: absolute;
+  left: 30px;
+  bottom: -1px;
+  width: 150px;
+  height: 1px;
+  background: linear-gradient(90deg, var(--live), transparent);
+  box-shadow: 0 0 10px var(--live);
+}
+
+.titleBlock {
+  gap: 7px;
+}
+
+.liveLabel {
+  gap: 9px;
+  color: var(--live);
+  font: 400 9.5px var(--mono);
+  letter-spacing: 0.28em;
+  text-shadow: var(--bloom);
+}
+
+.liveLabel i {
+  width: 5px;
+  height: 5px;
+  background: currentColor;
+  box-shadow: 0 0 9px currentColor, 0 0 18px currentColor;
+  animation: aegis-pulse 2s ease-in-out infinite;
+}
+
+.titleBlock h1 {
+  color: var(--paper);
+  font: 300 30px/1.1 var(--sans);
+  letter-spacing: 0.01em;
+  text-shadow: 0 0 18px rgba(127, 212, 255, 0.35);
+}
+
+.titleBlock p {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.headerActions {
+  flex-wrap: wrap;
+}
+
+.deckSearch {
+  width: 260px;
+  height: 38px;
+  border: 0;
+  border-radius: 0;
+  background: rgba(4, 12, 22, 0.62);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+.deckSearch:focus-within {
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.6), 0 0 20px rgba(58, 169, 255, 0.2);
+}
+
+.deckSearch span {
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.deckSearch input {
+  color: var(--paper);
+  font: 400 11px var(--mono);
+  letter-spacing: 0.03em;
+}
+
+.laneFilters {
+  gap: 8px;
+  padding-bottom: 15px;
+}
+
+.laneFilters > span,
+.laneFilters button {
+  font: 400 9.5px var(--mono);
+  letter-spacing: 0.2em;
+}
+
+.laneFilters > span {
+  color: var(--muted);
+}
+
+.laneFilters button {
+  position: relative;
+  padding: 7px 13px;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+.laneFilters button:hover {
+  color: var(--dim);
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(90, 190, 255, 0.3);
+}
+
+.laneFilters button.active {
+  color: var(--live);
+  border: 0;
+  background: rgba(58, 169, 255, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.5), 0 0 14px rgba(58, 169, 255, 0.2);
+  text-shadow: var(--bloom-soft);
+}
+
+.deckContent {
+  padding: 26px 30px 60px;
+}
+
+/* HUD panels and metrics */
+.deckPanel,
+.metricDeck > div,
+.kanbanColumn article,
+.workflowListCard,
+.opsCard,
+.contentPostMockup {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(160deg, rgba(20, 60, 98, 0.28), rgba(4, 12, 22, 0.5) 62%);
+  box-shadow: inset 0 0 0 1px var(--soft), inset 0 1px 0 rgba(127, 212, 255, 0.12);
+  backdrop-filter: blur(4px);
+}
+
+.deckPanel::before,
+.metricDeck > div::before,
+.kanbanColumn article::before,
+.workflowListCard::before,
+.opsCard::before {
+  content: "";
+  position: absolute;
+  z-index: 2;
+  inset: -1px;
+  border: 1px solid var(--edge);
+  opacity: 0.55;
+  filter: drop-shadow(0 0 4px rgba(104, 196, 255, 0.6));
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000, #000) 0 0 / 24px 24px no-repeat,
+    linear-gradient(#000, #000) 100% 0 / 24px 24px no-repeat,
+    linear-gradient(#000, #000) 0 100% / 24px 24px no-repeat,
+    linear-gradient(#000, #000) 100% 100% / 24px 24px no-repeat;
+  mask:
+    linear-gradient(#000, #000) 0 0 / 24px 24px no-repeat,
+    linear-gradient(#000, #000) 100% 0 / 24px 24px no-repeat,
+    linear-gradient(#000, #000) 0 100% / 24px 24px no-repeat,
+    linear-gradient(#000, #000) 100% 100% / 24px 24px no-repeat;
+}
+
+.teamPanel::after {
+  content: none;
+}
+
+.panelHead {
+  position: relative;
+  align-items: center;
+  padding: 18px 20px 15px;
+  border-color: var(--soft);
+}
+
+.panelHead::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: -1px;
+  width: 64px;
+  height: 1px;
+  background: var(--live);
+  box-shadow: 0 0 8px var(--live);
+}
+
+.panelHead span,
+.metricDeck span,
+.approvalBody span,
+.briefLine span,
+.briefRecommendation span,
+.contentHead,
+.ledgerHead,
+.leadHead {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.21em;
+}
+
+.panelHead span {
+  color: var(--live);
+  text-shadow: var(--bloom-soft);
+}
+
+.panelHead h2 {
+  color: var(--paper);
+  font: 300 18px/1.2 var(--sans);
+  letter-spacing: 0.02em;
+}
+
+.panelHead > small {
+  color: var(--muted);
+  font: 400 10px var(--mono);
+  letter-spacing: 0.08em;
+}
+
+.metricDeck {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  border: 0;
+  background: transparent;
+}
+
+.metricDeck > div {
+  min-height: 122px;
+  align-content: center;
+  gap: 9px;
+  padding: 20px 22px;
+}
+
+.metricDeck strong {
+  color: var(--paper);
+  font: 300 40px/1 var(--mono);
+  letter-spacing: -0.03em;
+  text-shadow: 0 0 16px rgba(127, 212, 255, 0.4);
+}
+
+.metricDeck small {
+  color: var(--muted);
+  font: 400 10px/1.45 var(--mono);
+  letter-spacing: 0.02em;
+}
+
+.commandView,
+.contentWorkspace,
+.agentOpsDeck {
+  gap: 22px;
+}
+
+.briefSnapshot > button,
+.briefSnapshot > div {
+  background: transparent;
+  border-color: var(--soft);
+}
+
+.briefSnapshot > button:hover,
+.briefSnapshot .attention,
+.decisionRow:hover,
+.teamRow:hover,
+.ledgerRow:hover,
+.contentCards > article:hover,
+.leadRow:hover {
+  background: rgba(58, 169, 255, 0.06);
+}
+
+.briefSnapshot .attention {
+  box-shadow: inset 0 2px 0 var(--warn);
+}
+
+.briefSnapshot p,
+.teamRow,
+.decisionRow,
+.dueRow,
+.ledgerRow,
+.workLogList article p,
+.approvalBody p {
+  color: var(--dim);
+}
+
+.briefSnapshot button > small,
+.textLink,
+.ownerLink:hover,
+.contentActions button,
+.contentActions a {
+  color: var(--brand);
+  text-shadow: var(--bloom-soft);
+}
+
+.miniKanbanGrid > div,
+.todaySchedule article,
+.teamRow,
+.decisionRow,
+.dueRow,
+.workLogList > article,
+.contentCards > article,
+.rejectedContentRow,
+.leadRow {
+  border-color: var(--soft);
+}
+
+.miniKanbanGrid button,
+.kanbanColumn article {
+  border: 0;
+  border-radius: 0;
+  background: rgba(10, 26, 42, 0.52);
+  box-shadow: inset 0 0 0 1px var(--soft);
+}
+
+.miniKanbanGrid button:hover,
+.kanbanColumn article:hover {
+  background: rgba(58, 169, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.4), 0 0 18px rgba(58, 169, 255, 0.12);
+}
+
+.teamRow {
+  grid-template-columns: 52px 126px 1fr 35px 102px;
+}
+
+.reportState b.missing,
+.urgent,
+.approvalCard > header > b,
+.contentRejectionError {
+  color: var(--warn);
+}
+
+/* Controls */
+.outlineBtn,
+.liveBtn,
+.ghostBtn,
+.contentActions button,
+.contentActions a,
+.calendarControls button,
+.workflowToolButton,
+.workflowSaveButton,
+.dangerBtn {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.16em;
+}
+
+.outlineBtn,
+.contentActions button,
+.contentActions a,
+.calendarControls button,
+.workflowToolButton {
+  color: var(--dim);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule);
+}
+
+.outlineBtn:hover,
+.contentActions button:hover,
+.contentActions a:hover,
+.calendarControls button:hover,
+.workflowToolButton:hover {
+  color: var(--live);
+  border: 0;
+  background: rgba(58, 169, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.4), 0 0 18px rgba(58, 169, 255, 0.15);
+}
+
+.liveBtn,
+.workflowSaveButton {
+  color: var(--live);
+  background: linear-gradient(180deg, rgba(58, 169, 255, 0.24), rgba(58, 169, 255, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.45), 0 0 16px rgba(58, 169, 255, 0.18);
+  text-shadow: var(--bloom-soft);
+}
+
+.liveBtn::before,
+.workflowSaveButton::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 1px solid var(--edge);
+  pointer-events: none;
+  -webkit-mask:
+    linear-gradient(#000, #000) 0 0 / 9px 9px no-repeat,
+    linear-gradient(#000, #000) 100% 0 / 9px 9px no-repeat,
+    linear-gradient(#000, #000) 0 100% / 9px 9px no-repeat,
+    linear-gradient(#000, #000) 100% 100% / 9px 9px no-repeat;
+  mask:
+    linear-gradient(#000, #000) 0 0 / 9px 9px no-repeat,
+    linear-gradient(#000, #000) 100% 0 / 9px 9px no-repeat,
+    linear-gradient(#000, #000) 0 100% / 9px 9px no-repeat,
+    linear-gradient(#000, #000) 100% 100% / 9px 9px no-repeat;
+}
+
+.liveBtn:hover,
+.workflowSaveButton:hover {
+  color: #eaf9ff;
+  background: linear-gradient(180deg, rgba(104, 196, 255, 0.38), rgba(58, 169, 255, 0.14));
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.6), 0 0 26px rgba(58, 169, 255, 0.35);
+}
+
+.ghostBtn {
+  color: var(--muted);
+}
+
+.ghostBtn:hover {
+  color: var(--live);
+}
+
+.signOut {
+  color: var(--muted);
+  font-family: var(--mono);
+  letter-spacing: 0.18em;
+}
+
+.squareCheck {
+  border: 0;
+  border-radius: 0;
+  box-shadow: inset 0 0 0 1px rgba(90, 190, 255, 0.28);
+}
+
+.squareCheck.done {
+  border: 0;
+  background: rgba(58, 169, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.6), 0 0 12px rgba(58, 169, 255, 0.35);
+}
+
+.squareCheck.done i {
+  background: var(--live);
+  box-shadow: 0 0 8px var(--live);
+}
+
+.statusPill {
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--rule);
+  font: 400 9px var(--mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.statusPill i {
+  background: currentColor;
+}
+
+.statusPill.sinprogress,
+.statusPill.sreview,
+.statusPill.sreadyforlupe,
+.statusPill.sawaitingtito,
+.statusPill.sscheduled,
+.statusPill.spublishing,
+.statusPill.squalified,
+.statusPill.sproposal {
+  color: var(--live);
+  background: rgba(104, 196, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.45);
+  text-shadow: var(--bloom-soft);
+}
+
+.statusPill.sblocked,
+.statusPill.srevisionrequested,
+.statusPill.sfailed,
+.statusPill.slost {
+  color: #ffd489;
+  background: rgba(255, 176, 32, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(255, 176, 32, 0.45);
+  text-shadow: 0 0 6px rgba(255, 176, 32, 0.5);
+}
+
+.statusPill.sdone,
+.statusPill.sapproved,
+.statusPill.spublished,
+.statusPill.swon {
+  color: var(--ok);
+  background: rgba(61, 220, 151, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(61, 220, 151, 0.4);
+}
+
+/* Kanban, calendar, content, leads and approvals */
+.kanbanColumn {
+  border: 0;
+  border-radius: 0;
+  background: rgba(4, 12, 22, 0.28);
+  box-shadow: inset 0 0 0 1px var(--soft);
+}
+
+.kanbanColumn > header,
+.calendarBar,
+.contentFilters,
+.contentHead,
+.leadFilters,
+.leadHead,
+.approvalCard > header,
+.approvalCard > footer {
+  border-color: var(--soft);
+}
+
+.kanbanColumn > header i,
+.calendarCell.today > header b,
+.propertyTone,
+.tone0 {
+  background: var(--brand);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.tone1 { background: var(--ok); }
+.tone2 { background: #9b7cff; }
+.tone3 { background: var(--warn); }
+
+.addInstruction {
+  border-color: var(--rule);
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.calendarGrid,
+.publishingCalendarGrid {
+  background: rgba(2, 8, 16, 0.36);
+}
+
+.calendarCell,
+.publishingDay {
+  border-color: var(--soft);
+}
+
+.calendarCell > button,
+.calendarContent {
+  background: rgba(10, 26, 42, 0.56);
+}
+
+.calendarContent:hover,
+.calendarCell > button:hover {
+  background: rgba(58, 169, 255, 0.1);
+}
+
+.contentFilters select,
+.leadFilters select,
+.deckDrawer input,
+.deckDrawer textarea,
+.deckDrawer select,
+.opsForm input,
+.opsForm textarea,
+.opsForm select,
+.publicReviewForm input,
+.publicReviewForm textarea {
+  border: 0;
+  border-radius: 0;
+  color: var(--paper);
+  background: rgba(4, 12, 22, 0.68);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  font-family: var(--mono);
+}
+
+.contentFilters select:focus,
+.deckDrawer input:focus,
+.deckDrawer textarea:focus,
+.deckDrawer select:focus,
+.opsForm input:focus,
+.opsForm textarea:focus,
+.opsForm select:focus,
+.publicReviewForm input:focus,
+.publicReviewForm textarea:focus {
+  border: 0;
+  outline: 0;
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.6), 0 0 20px rgba(58, 169, 255, 0.2);
+}
+
+.feedAvatar,
+.feedPlaceholder,
+.mobilePostCreative > span {
+  border-radius: 0;
+  color: var(--live);
+  background: rgba(58, 169, 255, 0.08);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.35);
+  font-family: var(--mono);
+}
+
+.feedPreview,
+.contentCreative,
+.mobilePostCreative {
+  background: #030910;
+}
+
+.propertyTabs button,
+.platformTabs button,
+.leadFilters button {
+  border-radius: 0;
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.propertyTabs button.active,
+.platformTabs button.active,
+.leadFilters button.active {
+  color: var(--live);
+  background: rgba(58, 169, 255, 0.1);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.35);
+}
+
+.approvalCard:not(.decided) {
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.24), inset 0 0 34px rgba(58, 169, 255, 0.1);
+}
+
+.briefRecommendation,
+.contentReviewDecision {
+  border-color: rgba(104, 196, 255, 0.55);
+  background: rgba(58, 169, 255, 0.08);
+  box-shadow: 0 0 24px rgba(58, 169, 255, 0.08);
+}
+
+.rejectedContentRow {
+  color: var(--paper);
+}
+
+.rejectedContentRow p {
+  color: var(--warn);
+}
+
+/* Drawers, review dialogs and overlays */
+.drawerShade,
+.commandReviewShade,
+.contentRejectionShade {
+  background: rgba(1, 4, 10, 0.72);
+  backdrop-filter: blur(5px);
+}
+
+.deckDrawer {
+  width: min(500px, 100%);
+  border: 0;
+  background: linear-gradient(200deg, rgba(16, 48, 78, 0.94), rgba(2, 9, 18, 0.98) 55%);
+  box-shadow: inset 1px 0 0 rgba(104, 196, 255, 0.6), -40px 0 90px rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.deckDrawer::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 1px;
+  background: linear-gradient(180deg, transparent, var(--live) 20%, var(--live) 80%, transparent);
+  box-shadow: 0 0 16px var(--live);
+}
+
+.deckDrawer h2,
+.commandReviewDialog h2,
+.contentRejectionDialog h2,
+.publicReviewCard h1,
+.loginCard h2 {
+  color: var(--paper);
+  font-family: var(--sans);
+  font-weight: 300;
+  letter-spacing: 0.01em;
+}
+
+.drawerClose {
+  color: var(--muted);
+  font-family: var(--mono);
+}
+
+.drawerClose:hover {
+  color: var(--live);
+}
+
+.commandReviewDialog,
+.contentRejectionDialog,
+.publicReviewCard {
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(160deg, rgba(20, 60, 98, 0.78), rgba(4, 12, 22, 0.96) 62%);
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.35), 0 28px 90px rgba(0, 0, 0, 0.68);
+}
+
+.commandReviewDialog > header,
+.commandReviewList > button,
+.briefLine,
+.contentPreviewFacts > div,
+.contentHistory > div {
+  border-color: var(--soft);
+}
+
+/* Workflow designer */
+.workflowDeckContent,
+.workflowCanvas,
+.react-flow,
+.workflowDesktop {
+  background: rgba(2, 6, 16, 0.64);
+}
+
+.workflowCanvas {
+  background-color: #040a12;
+  background-image: radial-gradient(rgba(46, 158, 255, 0.18) 1px, transparent 1px);
+  background-size: 20px 20px;
+}
+
+.workflowToolbar,
+.workflowPalette,
+.workflowInspector,
+.workflowListHeader {
+  border-color: var(--soft);
+  background: rgba(4, 12, 22, 0.82);
+}
+
+.workflowNodeCard {
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(14, 30, 46, 0.97), rgba(8, 18, 28, 0.97));
+  box-shadow: inset 0 0 0 1px var(--soft);
+}
+
+.workflowNodeCard.selected {
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.6), 0 0 22px rgba(58, 169, 255, 0.18);
+}
+
+.workflowCanvas .react-flow {
+  --xy-background-color: #040a12;
+  --xy-background-pattern-dots-color: rgba(46, 158, 255, 0.22);
+  --xy-edge-stroke: rgba(90, 190, 255, 0.55);
+  --xy-edge-stroke-selected: var(--live);
+  --xy-connectionline-stroke: var(--live);
+  --xy-handle-background-color: var(--brand);
+  --xy-handle-border-color: #040a12;
+  --xy-controls-button-background-color: rgba(10, 26, 42, 0.9);
+  --xy-controls-button-background-color-hover: rgba(24, 58, 90, 0.9);
+  --xy-controls-button-color: var(--dim);
+  --xy-controls-button-border-color: var(--rule);
+  --xy-minimap-background-color: #020610;
+  --xy-minimap-node-background-color: var(--brand);
+}
+
+/* Authentication and public review surfaces */
+.companyLogin {
+  background: transparent;
+}
+
+.loginBrand {
+  border-color: rgba(104, 196, 255, 0.45);
+  background:
+    radial-gradient(circle at 78% 20%, rgba(58, 169, 255, 0.2), transparent 32%),
+    linear-gradient(150deg, rgba(5, 24, 43, 0.97), rgba(1, 6, 13, 0.98) 70%);
+  box-shadow: inset -1px 0 0 rgba(104, 196, 255, 0.28);
+}
+
+.loginBrand::before {
+  content: "";
+  position: absolute;
+  right: 20px;
+  bottom: 200px;
+  width: 120px;
+  height: 120px;
+  border: 1px solid rgba(104, 196, 255, 0.3);
+  border-top-color: transparent;
+  border-left-color: transparent;
+  border-radius: 50%;
+  animation: aegis-spin 22s linear infinite;
+}
+
+.loginBrand::after {
+  border-color: rgba(46, 158, 255, 0.26);
+  box-shadow: 0 0 0 55px rgba(46, 158, 255, 0.035), 0 0 0 110px rgba(46, 158, 255, 0.022);
+}
+
+.loginBrand span,
+.loginEyebrow {
+  color: var(--live);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  text-shadow: var(--bloom-soft);
+}
+
+.loginBrand h1 {
+  color: var(--paper);
+  font: 300 clamp(34px, 3.9vw, 54px) / 1.12 var(--sans);
+  letter-spacing: 0.005em;
+  text-shadow: 0 0 30px rgba(127, 212, 255, 0.35);
+}
+
+.loginBrand p,
+.loginCard > p,
+.loginHelp {
+  color: var(--muted);
+}
+
+.loginPanel {
+  background: rgba(1, 5, 11, 0.34);
+  backdrop-filter: blur(8px);
+}
+
+.loginCard label {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+.loginCard input {
+  border: 0;
+  border-radius: 0;
+  color: var(--paper);
+  background: rgba(4, 12, 22, 0.62);
+  box-shadow: inset 0 0 0 1px var(--rule);
+  font-family: var(--mono);
+}
+
+.loginCard input:focus {
+  border: 0;
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.6), 0 0 20px rgba(58, 169, 255, 0.2);
+}
+
+.loginCard form button {
+  position: relative;
+  border: 0;
+  border-radius: 0;
+  color: var(--live);
+  background: linear-gradient(180deg, rgba(58, 169, 255, 0.24), rgba(58, 169, 255, 0.08));
+  box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.45), 0 0 16px rgba(58, 169, 255, 0.18);
+  font-family: var(--mono);
+  text-shadow: var(--bloom-soft);
+}
+
+.loginCard form button:hover {
+  background: linear-gradient(180deg, rgba(104, 196, 255, 0.38), rgba(58, 169, 255, 0.14));
+}
+
+.loginHelp::before {
+  background: var(--live);
+  box-shadow: 0 0 9px var(--live);
+}
+
+/* Mobile */
+@media (max-width: 1100px) {
+  .metricDeck {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body::before {
+    background-size: 36px 36px, 36px 36px, auto, auto, auto;
+  }
+
+  .deck {
+    display: block;
+  }
+
+  .deck::before {
+    left: 50%;
+    width: 130vw;
+    opacity: 0.35;
+  }
+
+  .mobileCommandHeader {
+    border-bottom: 0;
+    background: linear-gradient(180deg, rgba(2, 7, 14, 0.98), rgba(2, 7, 14, 0.88));
+    box-shadow: inset 0 -1px 0 var(--soft);
+    backdrop-filter: blur(14px);
+  }
+
+  .mobileStatus {
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .mobileLink,
+  .mobileViewStrip button.active,
+  .mobileBottomNav button.active,
+  .mobileNew {
+    color: var(--live);
+    text-shadow: var(--bloom-soft);
+  }
+
+  .mobileMark {
+    border-radius: 0;
+    background: rgba(58, 169, 255, 0.08);
+    box-shadow: inset 0 0 0 1px rgba(104, 196, 255, 0.35);
+  }
+
+  .mobileViewStrip button {
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .mobileViewStrip button.active,
+  .mobileBottomNav button.active {
+    border-color: var(--live);
+  }
+
+  .mobileBottomNav {
+    border-color: var(--soft);
+    background: rgba(2, 7, 14, 0.96);
+    backdrop-filter: blur(16px);
+  }
+
+  .mobileBottomNav button {
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  .deckContent {
+    padding: 18px 14px 104px;
+  }
+
+  .metricDeck {
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+
+  .metricDeck > div {
+    min-height: 108px;
+    padding: 16px;
+  }
+
+  .metricDeck strong {
+    font-size: 31px;
+  }
+
+  .deckPanel,
+  .metricDeck > div,
+  .kanbanColumn article {
+    backdrop-filter: blur(2px);
+  }
+
+  .deckDrawer {
+    background: linear-gradient(180deg, rgba(16, 48, 78, 0.96), rgba(2, 9, 18, 0.99) 55%);
+    box-shadow: inset 0 1px 0 rgba(104, 196, 255, 0.6), 0 -28px 70px rgba(0, 0, 0, 0.72);
+  }
+
+  .companyLogin {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck::before,
+  .loginBrand::before,
+  .liveLabel i {
+    animation: none;
+  }
+}
