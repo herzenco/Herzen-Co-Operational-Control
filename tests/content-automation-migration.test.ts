@@ -75,7 +75,8 @@ test("cron-secret and tokenized review routes bypass browser-session redirects",
 test("publishing adapters use authenticated provider APIs and require canonical provider IDs", () => {
   assert.match(publishing, /WEBSITE_PUBLISHING_WEBHOOK_SECRET/);
   assert.match(publishing, /LINKEDIN_PUBLISHING_WEBHOOK_SECRET/);
-  assert.match(publishing, /seo_score: item\.seo_score/);
+  assert.match(publishing, /approvedPayload/);
+  assert.match(publishing, /Idempotency-Key/);
   assert.match(linkedinAdapter, /https:\/\/api\.linkedin\.com\/rest\/posts/);
   assert.match(linkedinAdapter, /X-Restli-Protocol-Version/);
   assert.match(linkedinAdapter, /x-restli-id/);

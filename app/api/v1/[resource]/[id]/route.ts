@@ -2,6 +2,8 @@ import { isApiError, requireMember } from "../../../../../utils/api/auth";
 import { getResource, pickFields } from "../../../../../utils/api/resources";
 import { fail, ok, preflight, readJson } from "../../../../../utils/api/responses";
 import { serializeApiResource } from "../../../../../utils/content-assets";
+import { approveWebsitePublication } from "../../../../../utils/content-automation/approve-publication";
+import { createAutomationClient } from "../../../../../utils/content-automation/server";
 import { normalizeContentWrite } from "../../../../../utils/content-write";
 
 type RouteContext = { params: Promise<{ resource: string; id: string }> };
@@ -40,13 +42,16 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (resourceName === "content-items") {
     const { data: current, error: currentError } = await context.supabase
       .from(resource.table)
-      .select("caption,creative_asset_path,metadata")
+      .select("caption,creative_asset_path,metadata,status,approval_state")
       .eq("id", id)
       .single();
     if (currentError || !current) return fail(404, "not_found", "The requested record was not found.");
     const normalized = normalizeContentWrite({ ...current, ...payload });
     if (normalized.error) return fail(422, "unhosted_creative", normalized.error);
     payload = { ...payload, caption: normalized.payload.caption };
+    if (current.status === "approved" && current.approval_state === "approved" && body.publish_at && body.status !== "publishing") {
+      payload.status = "scheduled";
+    }
   }
   if (resourceName === "tasks" && body.status === "done" && !body.completed_at) {
     payload.completed_at = new Date().toISOString();
@@ -63,6 +68,38 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     payload.applied_at = body.applied_at || new Date().toISOString();
   }
 
+  if (resourceName === "approvals" && body.status === "approved") {
+    const { data: currentApproval, error: currentApprovalError } = await context.supabase
+      .from("approvals")
+      .select("id,content_item_id")
+      .eq("id", id)
+      .single();
+    if (currentApprovalError || !currentApproval) return fail(404, "not_found", "The approval record was not found.");
+    if (currentApproval.content_item_id) {
+      const { data: approvalItem, error: approvalItemError } = await context.supabase
+        .from("content_items")
+        .select("channel_id")
+        .eq("id", currentApproval.content_item_id)
+        .single();
+      if (approvalItemError || !approvalItem) return fail(409, "approval_sync_failed", approvalItemError?.message || "The approval content item was not found.");
+      const { data: approvalChannel, error: approvalChannelError } = approvalItem
+        ? await context.supabase.from("content_channels").select("platform").eq("id", approvalItem.channel_id).single()
+        : { data: null, error: null };
+      if (approvalChannelError || !approvalChannel) return fail(409, "approval_sync_failed", approvalChannelError?.message || "The approval publishing channel was not found.");
+      if (approvalChannel?.platform === "website") {
+        const approval = await approveWebsitePublication(createAutomationClient(), {
+          contentItemId: String(currentApproval.content_item_id),
+          reviewerName: context.user?.email || "Herzen reviewer",
+          reviewerEmail: context.user?.email || null,
+        });
+        if (!approval.ok) return fail(422, "website_destination_required", approval.errors.join(" "), { validation_errors: approval.errors });
+        const { data: updatedApproval, error: updatedApprovalError } = await context.supabase.from("approvals").select("*").eq("id", id).single();
+        if (updatedApprovalError || !updatedApproval) return fail(409, "approval_sync_failed", updatedApprovalError?.message || "The approval was recorded but could not be reloaded.");
+        return ok(serializeApiResource(resourceName, updatedApproval));
+      }
+    }
+  }
+
   const { data, error } = await context.supabase
     .from(resource.table)
     .update(payload)
@@ -70,6 +107,16 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     .select()
     .single();
   if (error || !data) return fail(400, "write_failed", error?.message || "The record could not be updated.");
+
+  if (resourceName === "content-items" && data.approval_state === "approved") {
+    if (body.status === "publishing") {
+      const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: new Date().toISOString(), next_attempt_at: null, retryable: true }).eq("content_item_id", data.id);
+      if (queueError) return fail(409, "publication_queue_failed", queueError.message);
+    } else if (body.publish_at && data.publish_at) {
+      const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: data.publish_at, next_attempt_at: null, retryable: true }).eq("content_item_id", data.id);
+      if (queueError) return fail(409, "publication_queue_failed", queueError.message);
+    }
+  }
 
   if (resourceName === "approvals" && data.content_item_id && body.status && body.status !== "pending") {
     const { data: canonicalContent } = await context.supabase
