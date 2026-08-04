@@ -15,7 +15,8 @@ export async function updateSession(request: NextRequest) {
   const isPublicAutomationRoute =
     request.nextUrl.pathname === "/api/cron/content-automation" ||
     request.nextUrl.pathname === "/api/review/content" ||
-    request.nextUrl.pathname.startsWith("/review/content/");
+    request.nextUrl.pathname.startsWith("/review/content/") ||
+    request.nextUrl.pathname.startsWith("/api/integrations/");
 
   // Allow local smoke tests and unauthenticated shells to render predictable
   // boundaries even when project secrets are not loaded.
