@@ -42,7 +42,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (resourceName === "content-items") {
     const { data: current, error: currentError } = await context.supabase
       .from(resource.table)
-      .select("caption,creative_asset_path,metadata,status,approval_state")
+      .select("caption,creative_asset_path,metadata,status,approval_state,channel_id")
       .eq("id", id)
       .single();
     if (currentError || !current) return fail(404, "not_found", "The requested record was not found.");
@@ -51,6 +51,15 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     payload = { ...payload, caption: normalized.payload.caption };
     if (current.status === "approved" && current.approval_state === "approved" && body.publish_at && body.status !== "publishing") {
       payload.status = "scheduled";
+    }
+    if (body.status === "publishing") {
+      const { data: channel, error: channelError } = await context.supabase
+        .from("content_channels")
+        .select("platform")
+        .eq("id", current.channel_id)
+        .single();
+      if (channelError || !channel) return fail(409, "channel_missing", "The content item's publishing channel could not be resolved.");
+      if (channel.platform === "linkedin") return fail(409, "lupe_publish_required", "LinkedIn items are published only when Lupe claims the approved OCC item.");
     }
   }
   if (resourceName === "tasks" && body.status === "done" && !body.completed_at) {
@@ -110,10 +119,10 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   if (resourceName === "content-items" && data.approval_state === "approved") {
     if (body.status === "publishing") {
-      const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: new Date().toISOString(), next_attempt_at: null, retryable: true }).eq("content_item_id", data.id);
+      const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: new Date().toISOString(), next_attempt_at: null, retryable: true }).eq("content_item_id", data.id).eq("platform", "website");
       if (queueError) return fail(409, "publication_queue_failed", queueError.message);
     } else if (body.publish_at && data.publish_at) {
-      const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: data.publish_at, next_attempt_at: null, retryable: true }).eq("content_item_id", data.id);
+      const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: data.publish_at, next_attempt_at: null, retryable: true }).eq("content_item_id", data.id).eq("platform", "website");
       if (queueError) return fail(409, "publication_queue_failed", queueError.message);
     }
   }

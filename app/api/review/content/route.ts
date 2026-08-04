@@ -17,7 +17,7 @@ export async function POST(request: Request) {
   const supabase = createAutomationClient();
   const link = await resolveReviewLink(supabase, token);
   if (!link) return NextResponse.json({ error: "This review link is invalid or expired." }, { status: 404 });
-  const { data: currentItem } = await supabase.from("content_items").select("id,approval_id,channel_id,publish_at").eq("id", link.content_item_id).single();
+  const { data: currentItem } = await supabase.from("content_items").select("id,approval_id,channel_id").eq("id", link.content_item_id).single();
   const { data: channel } = currentItem ? await supabase.from("content_channels").select("platform").eq("id", currentItem.channel_id).single() : { data: null };
   if (action === "approved" && channel?.platform === "website") {
     const approval = await approveWebsitePublication(supabase, {
@@ -45,11 +45,6 @@ export async function POST(request: Request) {
     if (currentItem?.approval_id) {
       const { error: approvalError } = await supabase.from("approvals").update({ status: action, decision_note: comment || null, decided_at: new Date().toISOString() }).eq("id", currentItem.approval_id);
       if (approvalError) return NextResponse.json({ error: approvalError.message }, { status: 500 });
-    }
-    if (action === "approved") {
-      if (currentItem && channel && ["website","linkedin"].includes(channel.platform)) {
-        await supabase.from("content_publish_jobs").upsert({ content_item_id: currentItem.id, platform: channel.platform, status: "queued", scheduled_for: currentItem.publish_at || new Date().toISOString() }, { onConflict: "content_item_id" });
-      }
     }
   }
   await supabase.from("content_review_links").update({ last_viewed_at: new Date().toISOString() }).eq("id", link.id);

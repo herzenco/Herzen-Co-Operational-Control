@@ -42,25 +42,16 @@ async function responseJson(response: Response): Promise<DbRecord> {
 }
 
 export async function publishContent(supabase: SupabaseClient, job: DbRecord, item: DbRecord): Promise<PublicationResult> {
-  const platform = String(job.platform) as "website" | "linkedin";
-  const endpoint = platform === "website" ? process.env.HERZEN_WEBSITE_PUBLISH_URL : process.env.LUPE_LINKEDIN_PUBLISH_URL;
-  if (!endpoint) throw new PublicationProviderError(`${platform} publishing endpoint is not configured.`, { retryable: false });
-  const webhookSecret = platform === "website"
-    ? process.env.WEBSITE_PUBLISHING_WEBHOOK_SECRET || process.env.PUBLISHING_WEBHOOK_SECRET
-    : process.env.LINKEDIN_PUBLISHING_WEBHOOK_SECRET || process.env.PUBLISHING_WEBHOOK_SECRET;
+  const platform = String(job.platform);
+  if (platform !== "website") throw new PublicationProviderError("LinkedIn publishing is Lupe-managed and cannot run from OCC.", { retryable: false });
+  const endpoint = process.env.HERZEN_WEBSITE_PUBLISH_URL;
+  if (!endpoint) throw new PublicationProviderError("website publishing endpoint is not configured.", { retryable: false });
+  const webhookSecret = process.env.WEBSITE_PUBLISHING_WEBHOOK_SECRET || process.env.PUBLISHING_WEBHOOK_SECRET;
   const approvedPayload = record(job.approved_payload);
-  if (platform === "website") {
-    if (!Object.keys(approvedPayload).length) throw new PublicationProviderError("The website publish job does not contain an approved snapshot.", { validationErrors: ["Re-approve this blog to freeze its final website package."], retryable: false });
-    if (String(approvedPayload.approved_content_hash || "") !== String(job.approved_content_hash || "")) throw new PublicationProviderError("The approved website snapshot hash does not match its publish job.", { validationErrors: ["Re-approve this blog before publishing."], retryable: false });
-    if (String(approvedPayload.content_item_id || "") !== String(item.id || "")) throw new PublicationProviderError("The approved website snapshot belongs to a different content item.", { validationErrors: ["Rebuild the publication job from the correct OCC record."], retryable: false });
-  }
-  const requestPayload = platform === "website" ? approvedPayload : {
-    content_item_id: item.id,
-    title: item.title,
-    body: item.body,
-    caption: item.caption,
-    publish_at: item.publish_at,
-  };
+  if (!Object.keys(approvedPayload).length) throw new PublicationProviderError("The website publish job does not contain an approved snapshot.", { validationErrors: ["Re-approve this blog to freeze its final website package."], retryable: false });
+  if (String(approvedPayload.approved_content_hash || "") !== String(job.approved_content_hash || "")) throw new PublicationProviderError("The approved website snapshot hash does not match its publish job.", { validationErrors: ["Re-approve this blog before publishing."], retryable: false });
+  if (String(approvedPayload.content_item_id || "") !== String(item.id || "")) throw new PublicationProviderError("The approved website snapshot belongs to a different content item.", { validationErrors: ["Rebuild the publication job from the correct OCC record."], retryable: false });
+  const requestPayload = approvedPayload;
   let response: Response;
   try {
     response = await fetch(endpoint, {
@@ -95,7 +86,7 @@ export async function publishContent(supabase: SupabaseClient, job: DbRecord, it
   const publishingStatus = String(result.publishing_status || result.status || "published");
   const { error } = await supabase.from("content_items").update({ status: "published", publication_state: "published", final_url: finalUrl, published_at: publishedAt, external_job_id: externalId, external_status: publishingStatus, failure_message: null }).eq("id", item.id);
   if (error) throw error;
-  if (platform === "website" && item.paired_content_item_id) {
+  if (item.paired_content_item_id) {
     const { data: companion, error: companionError } = await supabase.from("content_items").select("id,body,caption,metadata,approval_state,status").eq("id", item.paired_content_item_id).single();
     if (companionError) throw companionError;
     if (companion.approval_state !== "approved" && !["scheduled", "publishing", "published"].includes(String(companion.status))) {

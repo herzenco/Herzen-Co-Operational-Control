@@ -52,9 +52,9 @@ test("an explicitly approved pilot can promote one evergreen fallback", () => {
   assert.match(runner, /promoteEvergreenFallback/);
 });
 
-test("review decisions remain asset-specific and independently queue publishing", () => {
+test("review decisions remain asset-specific without auto-triggering LinkedIn publishing", () => {
   assert.match(reviewRoute, /eq\("id", link\.content_item_id\)/);
-  assert.match(reviewRoute, /content_publish_jobs/);
+  assert.doesNotMatch(reviewRoute, /content_publish_jobs/);
   assert.doesNotMatch(reviewRoute, /paired_content_item_id/);
 });
 
@@ -72,15 +72,13 @@ test("cron-secret and tokenized review routes bypass browser-session redirects",
   assert.match(middleware, /isOperationsApi \|\| isPublicAutomationRoute/);
 });
 
-test("publishing adapters use authenticated provider APIs and require canonical provider IDs", () => {
+test("OCC publishes websites only and leaves LinkedIn publication to Lupe", () => {
   assert.match(publishing, /WEBSITE_PUBLISHING_WEBHOOK_SECRET/);
-  assert.match(publishing, /LINKEDIN_PUBLISHING_WEBHOOK_SECRET/);
   assert.match(publishing, /approvedPayload/);
   assert.match(publishing, /Idempotency-Key/);
-  assert.match(linkedinAdapter, /https:\/\/api\.linkedin\.com\/rest\/posts/);
-  assert.match(linkedinAdapter, /X-Restli-Protocol-Version/);
-  assert.match(linkedinAdapter, /x-restli-id/);
-  assert.match(linkedinAdapter, /linkedin_not_configured/);
+  assert.doesNotMatch(publishing, /LUPE_LINKEDIN_PUBLISH_URL/);
+  assert.match(linkedinAdapter, /linkedin_publishing_is_lupe_managed/);
+  assert.doesNotMatch(linkedinAdapter, /api\.linkedin\.com/);
 });
 
 test("Lupe delivery sends only review titles and URLs through WhatsApp", () => {

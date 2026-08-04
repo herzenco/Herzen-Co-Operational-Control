@@ -71,9 +71,11 @@ test("the migration makes approval atomic and publication attempts append-only",
 test("the worker sends the approved payload and audits each provider attempt", () => {
   const publishing = readFileSync(new URL("../utils/content-automation/publishing.ts", import.meta.url), "utf8");
   const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
-  assert.match(publishing, /platform === "website" \? approvedPayload/);
+  assert.match(publishing, /platform !== "website"/);
+  assert.match(publishing, /const requestPayload = approvedPayload/);
   assert.doesNotMatch(publishing, /meta_description: item\.meta_description/);
   assert.match(runner, /content_publish_attempts/);
+  assert.match(runner, /eq\("platform", "website"\)/);
   assert.match(runner, /Recovered a stale publishing lease/);
   assert.match(runner, /runDueSchedules[\s\S]*runPublishQueue\(supabase, now\)/);
 });

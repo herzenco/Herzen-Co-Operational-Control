@@ -502,9 +502,11 @@ The content interface provides:
 
 ### 10.7 Publishing integration boundaries
 
-**LinkedIn:** OCC owns approval, schedule, and system-of-record tracking. Lupe's
-external automation owns the actual post. A secure callback or polling contract
-should eventually reconcile job state and final URL.
+**LinkedIn:** OCC owns approval, schedule, the canonical final package, and
+system-of-record tracking. Approval does not trigger Lupe. Herzen asks Lupe to
+publish a specific approved item; Lupe claims that item through the authenticated
+manual publication contract, posts through Lupe's own connection, and writes the
+final URL or confirmed failure back to OCC. The content ID is the dedupe key.
 
 **Instagram:** Publishing is manual. Lupe records the URL and screenshot. Do not
 automate until Tito authorizes the workflow.

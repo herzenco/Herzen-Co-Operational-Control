@@ -197,8 +197,8 @@ async function runAuditRetry(supabase: SupabaseClient, runId: string, configurat
 
 export async function runPublishQueue(supabase: SupabaseClient, publishNow = new Date()) {
   const stalePublishingAt = new Date(publishNow.getTime() - 15 * 60_000).toISOString();
-  await supabase.from("content_publish_jobs").update({ status: "failed", retryable: true, next_attempt_at: publishNow.toISOString(), failure_message: "Recovered a stale publishing lease." }).eq("status", "publishing").or(`last_request_at.is.null,last_request_at.lt.${stalePublishingAt}`);
-  const { data: publishJobs, error: publishError } = await supabase.from("content_publish_jobs").select("*,content_items(*)").or(`status.eq.queued,and(status.eq.failed,retryable.eq.true,next_attempt_at.lte.${publishNow.toISOString()})`).lte("scheduled_for", publishNow.toISOString()).order("scheduled_for").limit(10);
+  await supabase.from("content_publish_jobs").update({ status: "failed", retryable: true, next_attempt_at: publishNow.toISOString(), failure_message: "Recovered a stale publishing lease." }).eq("platform", "website").eq("status", "publishing").or(`last_request_at.is.null,last_request_at.lt.${stalePublishingAt}`);
+  const { data: publishJobs, error: publishError } = await supabase.from("content_publish_jobs").select("*,content_items(*)").eq("platform", "website").or(`status.eq.queued,and(status.eq.failed,retryable.eq.true,next_attempt_at.lte.${publishNow.toISOString()})`).lte("scheduled_for", publishNow.toISOString()).order("scheduled_for").limit(10);
   if (publishError) throw publishError;
   const published = [];
   for (const job of publishJobs || []) {
