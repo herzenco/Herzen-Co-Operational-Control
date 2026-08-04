@@ -4,6 +4,14 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
+import {
+  AgentMark,
+  LiveLabel,
+  MetricDeck,
+  PanelHeader,
+  SearchField,
+  StatusPill,
+} from "./ui/command-center-primitives";
 import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
 import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
 
@@ -1029,15 +1037,15 @@ export function CommandCenter() {
   function renderCommand() {
     return (
       <div className="commandView">
-        <section className="metricDeck">
-          <div><span>Open instructions</span><strong>{String(activeTasks.length).padStart(2, "0")}</strong><small>Across {agents.length} operating lanes</small></div>
-          <div><span>Due today</span><strong>{String(dueToday.length).padStart(2, "0")}</strong><small>Requires attention before close</small></div>
-          <div><span>Approval queue</span><strong>{String(pendingApprovals.length).padStart(2, "0")}</strong><small>Decision packages awaiting you</small></div>
-          <div><span>Daily reports</span><strong>{reporting}/{agents.length}</strong><small>{agents.length - reporting} lanes still silent</small></div>
-        </section>
+        <MetricDeck items={[
+          { label: "Open instructions", value: String(activeTasks.length).padStart(2, "0"), note: <>Across {agents.length} operating lanes</> },
+          { label: "Due today", value: String(dueToday.length).padStart(2, "0"), note: "Requires attention before close" },
+          { label: "Approval queue", value: String(pendingApprovals.length).padStart(2, "0"), note: "Decision packages awaiting you" },
+          { label: "Daily reports", value: <>{reporting}/{agents.length}</>, note: <>{agents.length - reporting} lanes still silent</> },
+        ]} />
 
         <section className="deckPanel commandBrief">
-          <header className="panelHead"><div><span>Daily brief</span><h2>{todayLabel}</h2></div><small>Live operational readout</small></header>
+          <PanelHeader eyebrow="Daily brief" title={todayLabel} meta="Live operational readout" />
           <div className="briefSnapshot">
             <button onClick={() => openCommandReview("Today’s focus", `${dueToday.length} instructions and ${contentDueToday.length} publications are due today.`, [...contentDueToday.map((record) => ({ kind: "content" as const, record })), ...dueToday.map((record) => ({ kind: "task" as const, record }))])}><span>Today’s focus</span><p>{dueToday.length || contentDueToday.length ? `${dueToday.length} instructions and ${contentDueToday.length} publications are due today. ${[...contentDueToday, ...dueToday].slice(0, 3).map((item) => text(item.title)).join(" · ")}` : "No instructions or publications are due today; use the window to clear review-stage work."}</p><small>Review items →</small></button>
             <button className={pendingApprovals.length ? "attention" : ""} onClick={() => openCommandReview("Your attention", `${pendingApprovals.length} approval packages await a decision.`, pendingApprovals.map((record) => ({ kind: "approval", record })))}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision.` : "No approval decisions are waiting."}</p><small>Review items →</small></button>
@@ -1048,7 +1056,7 @@ export function CommandCenter() {
 
         <div className="commandSnapshots">
           <section className="deckPanel miniKanban">
-            <header className="panelHead"><div><span>Kanban snapshot</span><h2>Work in motion</h2></div><button className="textLink compactLink" onClick={() => setView("kanban")}>Open board →</button></header>
+            <PanelHeader eyebrow="Kanban snapshot" title="Work in motion" action={<button className="textLink compactLink" onClick={() => setView("kanban")}>Open board →</button>} />
             <div className="miniKanbanGrid">
               {STATUS_COLUMNS.map((column) => {
                 const items = tasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
@@ -1058,7 +1066,7 @@ export function CommandCenter() {
           </section>
 
           <section className="deckPanel todayCalendar">
-            <header className="panelHead"><div><span>Today’s calendar</span><h2>Content going live</h2></div><small>{contentDueToday.length} scheduled</small></header>
+            <PanelHeader eyebrow="Today’s calendar" title="Content going live" meta={<>{contentDueToday.length} scheduled</>} />
             <div className="todaySchedule">
               {contentDueToday.map((item) => (
                 <article key={String(item.id)}>
@@ -1074,13 +1082,13 @@ export function CommandCenter() {
 
         <div className="commandGrid">
           <section className="deckPanel teamPanel">
-            <header className="panelHead"><div><span>Roster state</span><h2>Agent operating lanes</h2></div><small>Click a lane to inspect</small></header>
+            <PanelHeader eyebrow="Roster state" title="Agent operating lanes" meta="Click a lane to inspect" />
             {agents.map((agent) => {
               const owned = activeTasks.filter((task) => String(task.owner_agent_id) === String(agent.id));
               const update = latestUpdate.get(String(agent.id));
               return (
                 <button className="teamRow" key={String(agent.id)} onClick={() => openAgent(agent)}>
-                  <span className="agentMark large">{initials(agent.code || agent.name)}</span>
+                  <AgentMark large>{initials(agent.code || agent.name)}</AgentMark>
                   <span className="agentIdentity"><b>{text(agent.name || agent.code)}</b><small>{text(agent.role, "Agent")}</small></span>
                   <span className="agentFocus">{text(agent.lane || agent.charter, "Operating lane")}</span>
                   <strong>{String(owned.length).padStart(2, "0")}</strong>
@@ -1092,7 +1100,7 @@ export function CommandCenter() {
 
           <div className="sideStack">
             <section className="deckPanel">
-              <header className="panelHead"><div><span>Needs direction</span><h2>Approval queue</h2></div><small>{pendingApprovals.length} open</small></header>
+              <PanelHeader eyebrow="Needs direction" title="Approval queue" meta={<>{pendingApprovals.length} open</>} />
               {pendingApprovals.slice(0, 4).map((approval) => (
                 <button className="decisionRow" key={String(approval.id)} onClick={() => setView("approvals")}>
                   <b>{text(approval.title, "Untitled approval")}</b>
@@ -1104,7 +1112,7 @@ export function CommandCenter() {
             </section>
 
             <section className="deckPanel">
-              <header className="panelHead"><div><span className="dim">Today</span><h2>Due before close</h2></div><small>{dueToday.length}</small></header>
+              <PanelHeader eyebrow="Today" eyebrowClassName="dim" title="Due before close" meta={dueToday.length} />
               {dueToday.slice(0, 5).map((task) => (
                 <div className="dueRow" key={String(task.id)}><i /><span><b>{text(task.title)}</b><small>{taskAssigneeName(task)}</small></span></div>
               ))}
@@ -1119,7 +1127,7 @@ export function CommandCenter() {
   function renderList() {
     return (
       <section className="deckPanel ledger">
-        <header className="panelHead"><div><span>Instruction ledger</span><h2>{visibleTasks.length} visible instructions</h2></div><small>Live from Supabase</small></header>
+        <PanelHeader eyebrow="Instruction ledger" title={`${visibleTasks.length} visible instructions`} meta="Live from Supabase" />
         <div className="ledgerHead"><span /><span>Instruction</span><span>Owner</span><span>Priority</span><span>Status</span><span>Due</span><span>Project</span></div>
         {visibleTasks.map((task) => (
           <div className="ledgerRow" key={String(task.id)}>
@@ -1127,7 +1135,7 @@ export function CommandCenter() {
             <span className="instruction"><b className={taskStatus(task) === "done" ? "struck" : ""}>{text(task.title)}</b><small>{text(task.description, "No context documented")}</small></span>
             <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{taskAssigneeName(task)}</button>
             <span className={text(task.priority) === "urgent" ? "urgent" : ""}>{text(task.priority, "medium")}</span>
-            <span className={`statusPill s${taskStatus(task).replace("_", "")}`}><i />{statusLabel(taskStatus(task))}</span>
+            <StatusPill status={taskStatus(task)}>{statusLabel(taskStatus(task))}</StatusPill>
             <span>{dateLabel(task.due_at)}</span>
             <span>{projectMap.get(String(task.project_id)) || "General"}</span>
           </div>
@@ -1153,7 +1161,7 @@ export function CommandCenter() {
                     <header><span>{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
                     <h3>{text(task.title)}</h3>
                     <p>{text(task.description, "No context documented.")}</p>
-                    <footer><span><span className="agentMark">{initials(taskAssigneeName(task))}</span>{taskAssigneeName(task)}</span>
+                    <footer><span><AgentMark>{initials(taskAssigneeName(task))}</AgentMark>{taskAssigneeName(task)}</span>
                       {column.id !== "done" && <button onClick={() => void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done")}>Advance →</button>}
                     </footer>
                   </article>
@@ -1170,11 +1178,11 @@ export function CommandCenter() {
   function renderWorkLogs() {
     return (
       <section className="deckPanel workLogPanel">
-        <header className="panelHead"><div><span>Documented execution</span><h2>{workLogs.length} work log entries</h2></div><button className="outlineBtn" onClick={() => openWorkLog()}>New work log</button></header>
+        <PanelHeader eyebrow="Documented execution" title={`${workLogs.length} work log entries`} action={<button className="outlineBtn" onClick={() => openWorkLog()}>New work log</button>} />
         <div className="workLogList">
           {workLogs.map((log) => (
             <article key={String(log.id)}>
-              <span className="agentMark">{initials(agentMap.get(String(log.agent_id)))}</span>
+              <AgentMark>{initials(agentMap.get(String(log.agent_id)))}</AgentMark>
               <div><header><b>{text(log.title, statusLabel(text(log.entry_type, "note")))}</b><span>{text(log.entry_type, "note")}</span></header><p>{text(log.body, "No narrative documented.")}</p><small>{agentMap.get(String(log.agent_id)) || "Unknown agent"} · {dateLabel(log.created_at)}{log.task_id ? ` · Task ${String(log.task_id).slice(0, 8)}` : ""}</small></div>
             </article>
           ))}
@@ -1209,7 +1217,7 @@ export function CommandCenter() {
 
     return <div className="agentOpsDeck">
       <section className="deckPanel opsControlPanel">
-        <header className="panelHead"><div><span>Canonical social operations</span><h2>Agent handoffs and delivery queue</h2></div><small>{agentWorkItems.length} artifacts · {contentFeedback.filter((item) => item.required === true && ["received", "blocked"].includes(text(item.status))).length} unresolved feedback</small></header>
+        <PanelHeader eyebrow="Canonical social operations" title="Agent handoffs and delivery queue" meta={<>{agentWorkItems.length} artifacts · {contentFeedback.filter((item) => item.required === true && ["received", "blocked"].includes(text(item.status))).length} unresolved feedback</>} />
         <div className="opsViewFilters">
           <label>Agent<select value={opsAgent} onChange={(event) => setOpsAgent(event.target.value)}><option value="all">All agents</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
           <label>Brand<select value={opsProperty} onChange={(event) => setOpsProperty(event.target.value)}><option value="all">All brands</option>{contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)}>{text(property.name)}</option>)}</select></label>
@@ -1292,7 +1300,7 @@ export function CommandCenter() {
     return (
       <div className="contentWorkspace">
         <section className="deckPanel propertyPanel">
-          <header className="panelHead"><div><span>Properties</span><h2>Channel preview</h2></div><small>See the feed before it publishes</small></header>
+          <PanelHeader eyebrow="Properties" title="Channel preview" meta="See the feed before it publishes" />
           <div className="propertyTabs" role="tablist" aria-label="Publishing properties">
             {contentProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
           </div>
@@ -1314,15 +1322,20 @@ export function CommandCenter() {
           </div>}
         </section>
 
-        <section className="metricDeck contentMetrics">
-          <div><span>Scheduled</span><strong>{String(scheduled.length).padStart(2, "0")}</strong><small>Approved content moving toward publication</small></div>
-          <div><span>With Tito</span><strong>{String(inReview.length).padStart(2, "0")}</strong><small>Lupe-managed review and revision packages</small></div>
-          <div><span>Published</span><strong>{String(published.length).padStart(2, "0")}</strong><small>Final URL and required evidence documented</small></div>
-          <div><span>Properties</span><strong>{contentProperties.filter((property) => text(property.status) === "active").length}</strong><small>{contentProperties.filter((property) => text(property.status) === "paused").length} property paused</small></div>
-        </section>
+        <MetricDeck className="contentMetrics" items={[
+          { label: "Scheduled", value: String(scheduled.length).padStart(2, "0"), note: "Approved content moving toward publication" },
+          { label: "With Tito", value: String(inReview.length).padStart(2, "0"), note: "Lupe-managed review and revision packages" },
+          { label: "Published", value: String(published.length).padStart(2, "0"), note: "Final URL and required evidence documented" },
+          { label: "Properties", value: contentProperties.filter((property) => text(property.status) === "active").length, note: `${contentProperties.filter((property) => text(property.status) === "paused").length} property paused` },
+        ]} />
 
         <section className="deckPanel publishingCalendar">
-          <header className="panelHead calendarPanelHead"><div><span>Publishing calendar</span><h2>{new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(monthDate)}</h2></div><div className="calendarControls"><button onClick={() => changeMonth(-1)} aria-label="Previous month">←</button><button onClick={() => changeMonth(1)} aria-label="Next month">→</button><button className="liveBtn" onClick={() => openContent()}>New content</button></div></header>
+          <PanelHeader
+            className="calendarPanelHead"
+            eyebrow="Publishing calendar"
+            title={new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(monthDate)}
+            action={<div className="calendarControls"><button onClick={() => changeMonth(-1)} aria-label="Previous month">←</button><button onClick={() => changeMonth(1)} aria-label="Next month">→</button><button className="liveBtn" onClick={() => openContent()}>New content</button></div>}
+          />
           <div className="propertyLegend" aria-label="Property color key">
             {contentProperties.map((property, index) => <span key={String(property.id)}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}</span>)}
           </div>
@@ -1345,7 +1358,7 @@ export function CommandCenter() {
         </section>
 
         <section className="deckPanel contentSchedule">
-          <header className="panelHead"><div><span>Posts</span><h2>Review every caption and creative</h2></div><small>Open a post to approve it or return feedback</small></header>
+          <PanelHeader eyebrow="Posts" title="Review every caption and creative" meta="Open a post to approve it or return feedback" />
           <div className="contentFilters">
             <label>Platform<select value={contentPlatform} onChange={(event) => setContentPlatform(event.target.value)}><option value="all">All platforms</option>{platforms.map((platform) => <option key={platform} value={platform}>{platform}</option>)}</select></label>
             <label>Account<select value={contentAccount} onChange={(event) => setContentAccount(event.target.value)}><option value="all">All accounts</option>{accounts.map((account) => <option key={account} value={account}>{account}</option>)}</select></label>
@@ -1366,7 +1379,7 @@ export function CommandCenter() {
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
               <button className="ownerLink" onClick={() => { const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
-              <span className={`statusPill s${text(item.status).replaceAll("_", "")}`}><i />{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</span>
+              <StatusPill status={text(item.status)}>{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</StatusPill>
               <span className="contentActions">
                 {["idea", "revision_requested"].includes(text(item.status)) && <button onClick={() => void advanceContent(item, "research_ready")}>Research ready</button>}
                 {text(item.status) === "research_ready" && <button onClick={() => void advanceContent(item, "drafting")}>Start draft</button>}
@@ -1395,7 +1408,7 @@ export function CommandCenter() {
         </section>
 
         <section className="deckPanel rejectedContent">
-          <header className="panelHead"><div><span>Rejected</span><h2>Feedback Lupe must carry forward</h2></div><small>Permanent decision history</small></header>
+          <PanelHeader eyebrow="Rejected" title="Feedback Lupe must carry forward" meta="Permanent decision history" />
           {rejectedFeedback.map((feedback) => {
             const item = contentItems.find((entry) => String(entry.id) === feedback.contentItemId);
             const owner = item ? agentMap.get(String(item.owner_agent_id)) : "Content owner";
@@ -1417,11 +1430,16 @@ export function CommandCenter() {
     const open = leads.filter((lead) => !["won", "lost", "spam"].includes(text(lead.status))).length;
     const followUps = leads.filter((lead) => lead.next_follow_up_at && new Date(String(lead.next_follow_up_at)) <= new Date() && !["won", "lost", "spam"].includes(text(lead.status))).length;
     return <div className="leadsWorkspace">
-      <section className="metricDeck leadsMetrics"><div><span>Open inquiries</span><strong>{String(open).padStart(2, "0")}</strong><small>Active conversations</small></div><div><span>New</span><strong>{String(leads.filter((lead) => text(lead.status) === "new").length).padStart(2, "0")}</strong><small>Awaiting first response</small></div><div><span>Follow-ups due</span><strong>{String(followUps).padStart(2, "0")}</strong><small>Needs action now</small></div><div><span>Won</span><strong>{String(leads.filter((lead) => text(lead.status) === "won").length).padStart(2, "0")}</strong><small>Converted inquiries</small></div></section>
-      <section className="deckPanel leadsLedger"><header className="panelHead"><div><span>Inquiry pipeline</span><h2>{visibleLeads.length} leads across your properties</h2></div><button className="liveBtn" onClick={() => openLead()}>New lead</button></header>
+      <MetricDeck className="leadsMetrics" items={[
+        { label: "Open inquiries", value: String(open).padStart(2, "0"), note: "Active conversations" },
+        { label: "New", value: String(leads.filter((lead) => text(lead.status) === "new").length).padStart(2, "0"), note: "Awaiting first response" },
+        { label: "Follow-ups due", value: String(followUps).padStart(2, "0"), note: "Needs action now" },
+        { label: "Won", value: String(leads.filter((lead) => text(lead.status) === "won").length).padStart(2, "0"), note: "Converted inquiries" },
+      ]} />
+      <section className="deckPanel leadsLedger"><PanelHeader eyebrow="Inquiry pipeline" title={`${visibleLeads.length} leads across your properties`} action={<button className="liveBtn" onClick={() => openLead()}>New lead</button>} />
         <div className="leadFilters"><span>Status</span>{["all", "new", "contacted", "qualified", "proposal", "won", "lost"].map((status) => <button key={status} className={leadStatus === status ? "active" : ""} onClick={() => setLeadStatus(status)}>{statusLabel(status)}</button>)}</div>
         <div className="leadHead"><span>Contact</span><span>Property</span><span>Source</span><span>Inquiry</span><span>Owner</span><span>Status</span><span>Follow-up</span></div>
-        {visibleLeads.map((lead) => <button className="leadRow" key={String(lead.id)} onClick={() => openLead(lead)}><span><b>{text(lead.contact_name)}</b><small>{text(lead.company, text(lead.email || lead.phone))}</small></span><span>{text(contentPropertyMap.get(String(lead.property_id))?.name, "Unassigned")}</span><span className="leadSource">{statusLabel(text(lead.source, "other"))}</span><span><b>{text(lead.subject, "General inquiry")}</b><small>{text(lead.inquiry)}</small></span><span>{agentMap.get(String(lead.assigned_agent_id)) || "Unassigned"}</span><span className={`statusPill s${text(lead.status).replace("_", "")}`}><i />{statusLabel(text(lead.status))}</span><span>{dateLabel(lead.next_follow_up_at)}</span></button>)}
+        {visibleLeads.map((lead) => <button className="leadRow" key={String(lead.id)} onClick={() => openLead(lead)}><span><b>{text(lead.contact_name)}</b><small>{text(lead.company, text(lead.email || lead.phone))}</small></span><span>{text(contentPropertyMap.get(String(lead.property_id))?.name, "Unassigned")}</span><span className="leadSource">{statusLabel(text(lead.source, "other"))}</span><span><b>{text(lead.subject, "General inquiry")}</b><small>{text(lead.inquiry)}</small></span><span>{agentMap.get(String(lead.assigned_agent_id)) || "Unassigned"}</span><StatusPill status={text(lead.status)}>{statusLabel(text(lead.status))}</StatusPill><span>{dateLabel(lead.next_follow_up_at)}</span></button>)}
         {!visibleLeads.length && <p className="opsEmpty">No inquiries match this view. Add a lead manually or connect a property intake source to the Leads API.</p>}
       </section>
     </div>;
@@ -1457,7 +1475,7 @@ export function CommandCenter() {
           {/* Vinext's dev runtime does not currently support next/image reliably. */}
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <span className="mobileMark"><img src="/herzen-mark-white.png" alt="" /></span>
-          <div><span className="liveLabel"><i />Live operation</span><h1>{VIEWS.find((item) => item.id === view)?.label}</h1></div>
+          <div><LiveLabel>Live operation</LiveLabel><h1>{VIEWS.find((item) => item.id === view)?.label}</h1></div>
           {view !== "workflows" && <button className="mobileNew" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New</button>}
         </div>
         <nav className="mobileViewStrip" aria-label="Operations views">
@@ -1486,7 +1504,7 @@ export function CommandCenter() {
           <span className="railLabel railLabelAction">Agent spaces <button onClick={() => openAgentForm()} aria-label="Create agent">+</button></span>
           {agents.map((agent) => (
             <button key={String(agent.id)} onClick={() => openAgent(agent)}>
-              <span className="agentMark">{initials(agent.code || agent.name)}</span><span>{text(agent.name || agent.code)}</span><i className={text(agent.status, "active") === "active" ? "online" : ""} />
+              <AgentMark>{initials(agent.code || agent.name)}</AgentMark><span>{text(agent.name || agent.code)}</span><i className={text(agent.status, "active") === "active" ? "online" : ""} />
             </button>
           ))}
           <p><b>{overview?.viewer.display_name || "Lupe"}</b><br />{overview?.viewer.role || "operator"} access</p>
@@ -1496,9 +1514,9 @@ export function CommandCenter() {
 
       <main className={`deckMain ${view === "workflows" ? "workflowDeckMain" : ""}`}>
         <header className={`deckHeader ${view === "workflows" ? "workflowDeckHeader" : ""}`}>
-          <div className="titleBlock"><span className="liveLabel"><i />Live operation</span><h1>{VIEWS.find((item) => item.id === view)?.label}</h1><p>Direction enters here. Execution leaves documented.</p></div>
+          <div className="titleBlock"><LiveLabel>Live operation</LiveLabel><h1>{VIEWS.find((item) => item.id === view)?.label}</h1><p>Direction enters here. Execution leaves documented.</p></div>
           {view !== "workflows" && <div className="headerActions">
-            <label className="deckSearch"><span>/</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "leads" ? "Search inquiries" : "Search instructions"} /></label>
+            <SearchField value={query} onChange={(event) => setQuery(event.target.value)} placeholder={view === "leads" ? "Search inquiries" : "Search instructions"} />
             <button className="outlineBtn" onClick={() => setDrawer("brief")}>Daily brief</button>
             <button className="liveBtn" onClick={() => { setForm(EMPTY_FORM); setDrawer("task"); }}>New instruction</button>
           </div>}
@@ -1536,7 +1554,7 @@ export function CommandCenter() {
         <div className="commandReviewShade" onMouseDown={(event) => { if (event.target === event.currentTarget) closeCommandReview(); }}>
           <section className="commandReviewDialog" role="dialog" aria-modal="true" aria-labelledby="command-review-title">
             <header>
-              <div><span className="liveLabel"><i />Command review</span><h2 id="command-review-title">{selectedReviewItem ? reviewItemTitle(selectedReviewItem) : commandReview.title}</h2></div>
+              <div><LiveLabel>Command review</LiveLabel><h2 id="command-review-title">{selectedReviewItem ? reviewItemTitle(selectedReviewItem) : commandReview.title}</h2></div>
               <button className="drawerClose" onClick={closeCommandReview}>Close</button>
             </header>
             {selectedReviewItem ? (
@@ -1582,7 +1600,7 @@ export function CommandCenter() {
             <button className="drawerClose" onClick={() => setDrawer(null)}>Close</button>
             {drawer === "task" && (
               <form onSubmit={(event) => { event.preventDefault(); void createTask(); }}>
-                <span className="liveLabel"><i />New instruction</span><h2>Put direction into motion.</h2><p>Assign the lane, context, due date, and definition of done. Lupe and the agent roster will work from this record.</p>
+                <LiveLabel>New instruction</LiveLabel><h2>Put direction into motion.</h2><p>Assign the lane, context, due date, and definition of done. Lupe and the agent roster will work from this record.</p>
                 <label>Instruction<input value={form.title} onChange={(event) => setForm({ ...form, title: event.target.value })} placeholder="What needs to happen?" /></label>
                 <label>Context<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
                 <div className="formPair"><label>Assignee<select value={form.assignee} onChange={(event) => setForm({ ...form, assignee: event.target.value })}><option value="">Unassigned</option><optgroup label="People">{profiles.map((profile) => <option key={String(profile.user_id)} value={`human:${String(profile.user_id)}`}>{text(profile.display_name)}</option>)}</optgroup><optgroup label="Agents">{agents.map((agent) => <option key={String(agent.id)} value={`agent:${String(agent.id)}`}>{text(agent.name || agent.code)}</option>)}</optgroup></select></label>
@@ -1594,7 +1612,7 @@ export function CommandCenter() {
             )}
             {drawer === "contentPreview" && selectedContent && (
               <div className="contentPreviewDrawer">
-                <span className="liveLabel"><i />Content preview</span>
+                <LiveLabel>Content preview</LiveLabel>
                 <h2>{text(selectedContent.title)}</h2>
                 <div className="contentPreviewMeta">
                   <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
@@ -1642,7 +1660,7 @@ export function CommandCenter() {
             )}
             {drawer === "content" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveContent(); }}>
-                <span className="liveLabel"><i />Content operations</span>
+                <LiveLabel>Content operations</LiveLabel>
                 <h2>{selectedContent ? "Document the work and its outcome." : "Create a content instruction."}</h2>
                 <p>Every item uses K2 research, passes through Lupe, and requires Tito approval before it can be scheduled or published.</p>
                 <label>Title<input value={contentForm.title} onChange={(event) => setContentForm({ ...contentForm, title: event.target.value })} placeholder="What are we publishing?" /></label>
@@ -1729,7 +1747,7 @@ export function CommandCenter() {
             )}
             {drawer === "lead" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveLead(); }}>
-                <span className="liveLabel"><i />Inquiry intake</span><h2>{selectedLead ? "Move the conversation forward." : "Capture a new lead."}</h2><p>Every inquiry is tied to a property, owned by a lane, and tracked through a clear commercial pipeline.</p>
+                <LiveLabel>Inquiry intake</LiveLabel><h2>{selectedLead ? "Move the conversation forward." : "Capture a new lead."}</h2><p>Every inquiry is tied to a property, owned by a lane, and tracked through a clear commercial pipeline.</p>
                 <div className="formPair"><label>Contact name<input value={leadForm.contact_name} onChange={(event) => setLeadForm({ ...leadForm, contact_name: event.target.value })} /></label><label>Company<input value={leadForm.company} onChange={(event) => setLeadForm({ ...leadForm, company: event.target.value })} /></label></div>
                 <div className="formPair"><label>Email<input type="email" value={leadForm.email} onChange={(event) => setLeadForm({ ...leadForm, email: event.target.value })} /></label><label>Phone<input type="tel" value={leadForm.phone} onChange={(event) => setLeadForm({ ...leadForm, phone: event.target.value })} /></label></div>
                 <div className="formPair"><label>Property<select value={leadForm.property_id} onChange={(event) => setLeadForm({ ...leadForm, property_id: event.target.value })}><option value="">Unassigned</option>{contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)}>{text(property.name)}</option>)}</select></label><label>Source<select value={leadForm.source} onChange={(event) => setLeadForm({ ...leadForm, source: event.target.value })}><option value="website">Website</option><option value="instagram">Instagram</option><option value="linkedin">LinkedIn</option><option value="email">Email</option><option value="referral">Referral</option><option value="phone">Phone</option><option value="other">Other</option></select></label></div>
@@ -1741,7 +1759,7 @@ export function CommandCenter() {
             )}
             {drawer === "agentForm" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveAgent(); }}>
-                <span className="liveLabel"><i />Agent management</span><h2>{selectedAgent ? "Edit the operating lane." : "Add an agent to the roster."}</h2><p>Define the identity, charter, standing instructions, and capabilities Lupe will coordinate.</p>
+                <LiveLabel>Agent management</LiveLabel><h2>{selectedAgent ? "Edit the operating lane." : "Add an agent to the roster."}</h2><p>Define the identity, charter, standing instructions, and capabilities Lupe will coordinate.</p>
                 <div className="formPair"><label>Code<input value={agentForm.code} onChange={(event) => setAgentForm({ ...agentForm, code: event.target.value })} placeholder="K2" /></label><label>Display name<input value={agentForm.name} onChange={(event) => setAgentForm({ ...agentForm, name: event.target.value })} /></label></div>
                 <div className="formPair"><label>Role<input value={agentForm.role} onChange={(event) => setAgentForm({ ...agentForm, role: event.target.value })} /></label><label>Status<select value={agentForm.status} onChange={(event) => setAgentForm({ ...agentForm, status: event.target.value })}><option value="active">Active</option><option value="paused">Paused</option><option value="retired">Retired</option></select></label></div>
                 <label>Operating lane<input value={agentForm.lane} onChange={(event) => setAgentForm({ ...agentForm, lane: event.target.value })} /></label><label>Charter<textarea value={agentForm.charter} onChange={(event) => setAgentForm({ ...agentForm, charter: event.target.value })} /></label><label>Standing instructions<textarea value={agentForm.instructions} onChange={(event) => setAgentForm({ ...agentForm, instructions: event.target.value })} /></label>
@@ -1750,7 +1768,7 @@ export function CommandCenter() {
             )}
             {drawer === "workLog" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveWorkLog(); }}>
-                <span className="liveLabel"><i />Execution evidence</span><h2>Document work while it is fresh.</h2><p>Connect the record to an agent and, when relevant, the instruction it advances.</p>
+                <LiveLabel>Execution evidence</LiveLabel><h2>Document work while it is fresh.</h2><p>Connect the record to an agent and, when relevant, the instruction it advances.</p>
                 <div className="formPair"><label>Agent<select value={workLogForm.agent_id} onChange={(event) => setWorkLogForm({ ...workLogForm, agent_id: event.target.value })}><option value="">Choose agent</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label><label>Type<select value={workLogForm.entry_type} onChange={(event) => setWorkLogForm({ ...workLogForm, entry_type: event.target.value })}>{["note", "progress", "decision", "blocker", "deliverable", "evidence"].map((entry) => <option key={entry}>{entry}</option>)}</select></label></div>
                 <label>Instruction<select value={workLogForm.task_id} onChange={(event) => setWorkLogForm({ ...workLogForm, task_id: event.target.value })}><option value="">Agent lane / no instruction</option>{tasks.map((task) => <option key={String(task.id)} value={String(task.id)}>{text(task.title)}</option>)}</select></label><label>Title<input value={workLogForm.title} onChange={(event) => setWorkLogForm({ ...workLogForm, title: event.target.value })} /></label><label>Narrative<textarea value={workLogForm.body} onChange={(event) => setWorkLogForm({ ...workLogForm, body: event.target.value })} /></label>
                 <label>Artifact references <small>One URL or path per line</small><textarea value={workLogForm.artifacts} onChange={(event) => setWorkLogForm({ ...workLogForm, artifacts: event.target.value })} /></label><button className="liveBtn full" type="submit">Record work</button>
@@ -1758,7 +1776,7 @@ export function CommandCenter() {
             )}
             {drawer === "dailyUpdate" && (
               <form onSubmit={(event) => { event.preventDefault(); void saveDailyUpdate(); }}>
-                <span className="liveLabel"><i />Daily reporting</span><h2>Account for the operating lane.</h2><p>Submitting again for the same agent and business date updates the existing report.</p>
+                <LiveLabel>Daily reporting</LiveLabel><h2>Account for the operating lane.</h2><p>Submitting again for the same agent and business date updates the existing report.</p>
                 <div className="formPair"><label>Agent<select value={dailyUpdateForm.agent_id} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, agent_id: event.target.value })}><option value="">Choose agent</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label><label>Business date<input type="date" value={dailyUpdateForm.update_date} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, update_date: event.target.value })} /></label></div>
                 <label>Health<select value={dailyUpdateForm.health} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, health: event.target.value })}><option value="on_track">On track</option><option value="at_risk">At risk</option><option value="blocked">Blocked</option></select></label><label>Summary<textarea value={dailyUpdateForm.summary} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, summary: event.target.value })} /></label>
                 {([['completed','Completed'],['blockers','Blockers'],['next_steps','Next steps'],['asks','Asks']] as const).map(([field, label]) => <label key={field}>{label} <small>One per line</small><textarea value={dailyUpdateForm[field]} onChange={(event) => setDailyUpdateForm({ ...dailyUpdateForm, [field]: event.target.value })} /></label>)}
@@ -1768,13 +1786,13 @@ export function CommandCenter() {
             {drawer === "agent" && selectedAgent && (() => {
               const mine = tasks.filter((task) => String(task.owner_agent_id) === String(selectedAgent.id));
               const update = latestUpdate.get(String(selectedAgent.id));
-              return <div><div className="agentDrawerHead"><span className="agentMark large">{initials(selectedAgent.code || selectedAgent.name)}</span><div><span className="liveLabel"><i />Agent space</span><h2>{text(selectedAgent.name || selectedAgent.code)}</h2></div></div><p>{text(selectedAgent.charter || selectedAgent.lane, "No charter documented.")}</p><div className="drawerActionRow"><button className="outlineBtn" onClick={() => openAgentForm(selectedAgent)}>Edit agent</button><button className="outlineBtn" onClick={() => openWorkLog(String(selectedAgent.id))}>Add work log</button><button className="liveBtn" onClick={() => openDailyUpdate(String(selectedAgent.id))}>Daily update</button></div>
+              return <div><div className="agentDrawerHead"><AgentMark large>{initials(selectedAgent.code || selectedAgent.name)}</AgentMark><div><LiveLabel>Agent space</LiveLabel><h2>{text(selectedAgent.name || selectedAgent.code)}</h2></div></div><p>{text(selectedAgent.charter || selectedAgent.lane, "No charter documented.")}</p><div className="drawerActionRow"><button className="outlineBtn" onClick={() => openAgentForm(selectedAgent)}>Edit agent</button><button className="outlineBtn" onClick={() => openWorkLog(String(selectedAgent.id))}>Add work log</button><button className="liveBtn" onClick={() => openDailyUpdate(String(selectedAgent.id))}>Daily update</button></div>
                 <div className="agentStats"><div><b>{mine.filter((task) => !["done", "cancelled"].includes(taskStatus(task))).length}</b><span>Open</span></div><div><b>{mine.filter((task) => taskStatus(task) === "review").length}</b><span>Review</span></div><div><b>{mine.filter((task) => taskStatus(task) === "done").length}</b><span>Closed</span></div></div>
                 <h3>Instructions</h3>{mine.map((task) => <button className="drawerTask" key={String(task.id)} onClick={() => { setLane(String(selectedAgent.id)); setView("list"); setDrawer(null); }}><span>{statusLabel(taskStatus(task))}</span><b>{text(task.title)}</b><small>{dateLabel(task.due_at)}</small></button>)}
                 <h3>Latest daily update</h3>{update ? <><div className="briefLine"><span>Summary</span><p>{text(update.summary)}</p></div><div className="briefLine"><span>Blockers</span><p>{Array.isArray(update.blockers) ? update.blockers.join(" · ") : text(update.blockers, "None reported")}</p></div><div className="briefLine"><span>Next</span><p>{Array.isArray(update.next_steps) ? update.next_steps.join(" · ") : text(update.next_steps, "Not reported")}</p></div></> : <p>No daily update has been submitted.</p>}</div>;
             })()}
             {drawer === "brief" && (
-              <div><span className="liveLabel"><i />Daily brief</span><h2>Operational state at a glance.</h2><p>Generated from the live instruction ledger, approval queue, and most recent agent reports.</p>
+              <div><LiveLabel>Daily brief</LiveLabel><h2>Operational state at a glance.</h2><p>Generated from the live instruction ledger, approval queue, and most recent agent reports.</p>
                 <div className="briefLine"><span>Open</span><p>{activeTasks.length} instructions remain open across {agents.length} agent lanes.</p></div>
                 <div className="briefLine"><span>Due today</span><p>{dueToday.length || contentDueToday.length ? [...contentDueToday, ...dueToday].map((item) => text(item.title)).join(" · ") : "Nothing is due before close."}</p></div>
                 <div className="briefLine"><span>Decisions</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval packages await direction.` : "The approval queue is clear."}</p></div>
@@ -1795,7 +1813,7 @@ export function CommandCenter() {
         }}>
           <section className="contentRejectionDialog" role="dialog" aria-modal="true" aria-labelledby="content-rejection-title" aria-describedby="content-rejection-help">
             <form onSubmit={(event) => { event.preventDefault(); void reviewContent(rejectingContent, "changes_requested", rejectionReason); }}>
-              <span className="liveLabel"><i />Return for revision</span>
+              <LiveLabel>Return for revision</LiveLabel>
               <h2 id="content-rejection-title">Why are you rejecting this post?</h2>
               <p id="content-rejection-help">Be specific. This feedback becomes permanent review history for Lupe and {agentMap.get(String(rejectingContent.owner_agent_id)) || "the content owner"}, so they can revise the post without repeating the mistake.</p>
               <label>Rejection reason<textarea autoFocus required value={rejectionReason} onChange={(event) => setRejectionReason(event.target.value)} placeholder="What needs to change, and what should the agents remember next time?" /></label>
