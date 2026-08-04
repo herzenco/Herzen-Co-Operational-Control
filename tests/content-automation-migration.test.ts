@@ -9,6 +9,9 @@ const runner = readFileSync(new URL("../utils/content-automation/runner.ts", imp
 const reviewRoute = readFileSync(new URL("../app/api/review/content/route.ts", import.meta.url), "utf8");
 const middleware = readFileSync(new URL("../utils/supabase/middleware.ts", import.meta.url), "utf8");
 const models = readFileSync(new URL("../utils/content-automation/models.ts", import.meta.url), "utf8");
+const publishing = readFileSync(new URL("../utils/content-automation/publishing.ts", import.meta.url), "utf8");
+const linkedinAdapter = readFileSync(new URL("../app/api/integrations/publishing/linkedin/route.ts", import.meta.url), "utf8");
+const whatsappAdapter = readFileSync(new URL("../app/api/integrations/delivery/whatsapp/route.ts", import.meta.url), "utf8");
 
 test("Phase 1 persists execution, pairs, audits, reviews, delivery, and publishing", () => {
   for (const table of ["content_generation_runs","content_pairs","content_audits","content_review_links","content_review_events","automation_schedules","workflow_runs","workflow_run_logs","content_delivery_jobs","content_publish_jobs"]) {
@@ -65,7 +68,26 @@ test("cron-secret and tokenized review routes bypass browser-session redirects",
   assert.match(middleware, /\/api\/cron\/content-automation/);
   assert.match(middleware, /\/api\/review\/content/);
   assert.match(middleware, /\/review\/content\//);
+  assert.match(middleware, /\/api\/integrations\//);
   assert.match(middleware, /isOperationsApi \|\| isPublicAutomationRoute/);
+});
+
+test("publishing adapters use authenticated provider APIs and require canonical provider IDs", () => {
+  assert.match(publishing, /WEBSITE_PUBLISHING_WEBHOOK_SECRET/);
+  assert.match(publishing, /LINKEDIN_PUBLISHING_WEBHOOK_SECRET/);
+  assert.match(publishing, /seo_score: item\.seo_score/);
+  assert.match(linkedinAdapter, /https:\/\/api\.linkedin\.com\/rest\/posts/);
+  assert.match(linkedinAdapter, /X-Restli-Protocol-Version/);
+  assert.match(linkedinAdapter, /x-restli-id/);
+  assert.match(linkedinAdapter, /linkedin_not_configured/);
+});
+
+test("Lupe delivery sends only review titles and URLs through WhatsApp", () => {
+  assert.match(whatsappAdapter, /graph\.facebook\.com/);
+  assert.match(whatsappAdapter, /item\.title/);
+  assert.match(whatsappAdapter, /item\.review_url/);
+  assert.doesNotMatch(whatsappAdapter, /\b(?:caption|asset_url|body): z\./i);
+  assert.match(whatsappAdapter, /whatsapp_not_configured/);
 });
 
 test("writer and independent auditor can use Vercel deployment identity", () => {
