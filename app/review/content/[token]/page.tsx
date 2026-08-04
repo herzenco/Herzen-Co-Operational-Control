@@ -2,9 +2,9 @@ import { notFound } from "next/navigation";
 import { resolveReviewLink } from "../../../../utils/content-automation/review-links";
 import { createAutomationClient } from "../../../../utils/content-automation/server";
 
-export default async function ContentReviewPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ submitted?: string }> }) {
+export default async function ContentReviewPage({ params, searchParams }: { params: Promise<{ token: string }>; searchParams: Promise<{ submitted?: string; error?: string }> }) {
   const { token } = await params;
-  const { submitted } = await searchParams;
+  const { submitted, error } = await searchParams;
   const supabase = createAutomationClient();
   const link = await resolveReviewLink(supabase, token);
   if (!link) notFound();
@@ -19,6 +19,7 @@ export default async function ContentReviewPage({ params, searchParams }: { para
     <article className="publicReviewCard">
       <header><span>Herzen Co. content review</span><h1>{item.title}</h1><p>{role} · {item.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "long", timeZone: "America/New_York" }).format(new Date(item.publish_at)) : "Unscheduled"}</p></header>
       {submitted && <div className="reviewSubmitted">Your {submitted.replaceAll("_", " ")} response was recorded.</div>}
+      {error && <div className="reviewSubmitted">Approval was not recorded: {error}</div>}
       <section className="reviewScoreDeck"><div><b>{item.seo_score}</b><span>SEO</span></div><div><b>{item.aeo_score}</b><span>AEO</span></div></section>
       <section className="reviewArticle">{role === "LinkedIn post" ? <p>{item.caption || item.body}</p> : String(item.body || "").split("\n").filter(Boolean).map((paragraph, index) => <p key={index}>{paragraph}</p>)}</section>
       <dl className="reviewFacts"><div><dt>Audience</dt><dd>{item.target_audience || "Not documented"}</dd></div><div><dt>Goal</dt><dd>{item.conversion_goal || "Not documented"}</dd></div><div><dt>Audit</dt><dd>{item.audit_summary || "Passed automated review"}</dd></div></dl>

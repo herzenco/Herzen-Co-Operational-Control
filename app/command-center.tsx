@@ -1373,7 +1373,9 @@ export function CommandCenter() {
                 {text(item.status) === "drafting" && <button onClick={() => void advanceContent(item, "ready_for_lupe")}>Send to Lupe</button>}
                 {text(item.status) === "ready_for_lupe" && <button onClick={() => void sendContentToTito(item)}>Send to Tito</button>}
                 {text(item.status) === "approved" && <button onClick={() => openContent(item)}>{item.publish_at ? "Schedule" : "Set schedule"}</button>}
-                {text(item.status) === "scheduled" && <button onClick={() => void advanceContent(item, "publishing")}>Begin publishing</button>}
+                {text(item.status) === "scheduled" && contentPlatformForItem(item).toLowerCase() === "linkedin"
+                  ? <small>Lupe publishes on command</small>
+                  : text(item.status) === "scheduled" && <button onClick={() => void advanceContent(item, "publishing")}>Begin publishing</button>}
                 {["publishing", "failed"].includes(text(item.status)) && <button onClick={() => openContent(item)}>Record result</button>}
                 {text(item.status) === "published" && Boolean(item.final_url) && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
               </span>

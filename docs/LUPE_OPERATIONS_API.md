@@ -257,9 +257,48 @@ approved later.
 
 ### Record publication
 
-LinkedIn publishing occurs through Lupe's external automation. The Control
-Center tracks its external job/status and final URL. Website publishing is
-OCC-managed. Instagram starts as manual.
+LinkedIn publishing is manual-command, Lupe-owned work. OCC approval does not
+notify or trigger Lupe. After Herzen identifies a specific approved item, Lupe
+claims its frozen publish input:
+
+```http
+POST /api/v1/content-items/<content uuid>/linkedin-publication
+Authorization: Bearer <OCC agent key>
+```
+
+Only an approved Herzen Co. item assigned to LinkedIn with a passing audit,
+canonical delivery asset, matching package manifest, and no unresolved required
+feedback can be claimed. A successful first claim returns `should_publish: true`
+and a `publish_input` containing the internal label, final body, media,
+property guard, approval status, optional schedule, platform, content ID, and
+stable idempotency key. A concurrent or repeated claim returns
+`should_publish: false`; if the item already shipped, its existing URL is
+returned instead of creating another post.
+
+Lupe sends `publish_input.body` as the post text and `publish_input.media` as
+attachments through Lupe's LinkedIn connection. The OCC title remains an
+internal label only. Lupe then writes the result back:
+
+```http
+PATCH /api/v1/content-items/<content uuid>/linkedin-publication
+Authorization: Bearer <OCC agent key>
+Content-Type: application/json
+
+{
+  "status": "published",
+  "idempotency_key": "occ:linkedin:<content uuid>",
+  "final_url": "https://www.linkedin.com/feed/update/example/",
+  "external_id": "optional provider id",
+  "published_at": "2026-08-04T13:00:00Z",
+  "provider_response": {}
+}
+```
+
+For a confirmed provider failure, Lupe sends `status: "failed"`, the same
+idempotency key, and a clear `failure_message`. Only a recorded failure may be
+claimed again. If the provider outcome is uncertain, Lupe must leave the claim
+in progress and reconcile it instead of retrying, which prevents duplicate
+posts. Website publishing remains OCC-managed. Instagram remains manual.
 
 ```http
 PATCH /api/v1/content-items/<content uuid>

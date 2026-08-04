@@ -8,7 +8,7 @@ import { createReviewLink } from "./review-links";
 import { buildCanonicalPackage, readyQaChecklist } from "./packages";
 import { etDayStart, nextMonthStart, nextScheduledAt } from "./schedule";
 import type { AutomationJobType, GeneratedAsset, PlannedTopic } from "./types";
-import { publishContent } from "./publishing";
+import { PublicationProviderError, publishContent } from "./publishing";
 
 type DbRecord = Record<string, unknown>;
 
@@ -192,20 +192,51 @@ async function runAuditRetry(supabase: SupabaseClient, runId: string, configurat
     const asset = { title: item.title, body: item.body, caption: item.caption, slug: item.slug, seo_title: item.seo_title, meta_description: item.meta_description, reasoning_summary: item.reasoning_summary } as GeneratedAsset;
     results.push(await auditUntilGate(supabase, runId, item, asset, topic, {}, iterationLimit));
   }
-  const { data: publishJobs, error: publishError } = await supabase.from("content_publish_jobs").select("*,content_items(*)").eq("status", "queued").lte("scheduled_for", new Date().toISOString()).limit(10);
+  return { retried: results.length, results };
+}
+
+export async function runPublishQueue(supabase: SupabaseClient, publishNow = new Date()) {
+  const stalePublishingAt = new Date(publishNow.getTime() - 15 * 60_000).toISOString();
+  await supabase.from("content_publish_jobs").update({ status: "failed", retryable: true, next_attempt_at: publishNow.toISOString(), failure_message: "Recovered a stale publishing lease." }).eq("platform", "website").eq("status", "publishing").or(`last_request_at.is.null,last_request_at.lt.${stalePublishingAt}`);
+  const { data: publishJobs, error: publishError } = await supabase.from("content_publish_jobs").select("*,content_items(*)").eq("platform", "website").or(`status.eq.queued,and(status.eq.failed,retryable.eq.true,next_attempt_at.lte.${publishNow.toISOString()})`).lte("scheduled_for", publishNow.toISOString()).order("scheduled_for").limit(10);
   if (publishError) throw publishError;
   const published = [];
   for (const job of publishJobs || []) {
+    const item = job.content_items as DbRecord;
+    const attempt = Number(job.attempt || 0) + 1;
+    let attemptId: string | null = null;
     try {
-      await supabase.from("content_publish_jobs").update({ status: "publishing", attempt: Number(job.attempt || 0) + 1 }).eq("id", job.id);
-      const finalUrl = await publishContent(supabase, job.content_items as DbRecord, job.platform);
-      await supabase.from("content_publish_jobs").update({ status: "published", final_url: finalUrl, published_at: new Date().toISOString() }).eq("id", job.id);
-      published.push({ content_item_id: job.content_item_id, final_url: finalUrl });
+      if (!item || item.approval_state !== "approved") throw new PublicationProviderError("The content item is not approved for publication.", { validationErrors: ["Approve the current final package before publishing."], retryable: false });
+      const requestedAt = new Date().toISOString();
+      await supabase.from("content_publish_jobs").update({ status: "publishing", attempt, last_request_at: requestedAt, next_attempt_at: null, failure_message: null }).eq("id", job.id);
+      await supabase.from("content_items").update({ status: "publishing", publication_state: "publishing", failure_message: null }).eq("id", item.id);
+      const requestPayload = (job.approved_payload || {}) as DbRecord;
+      const { data: attemptRecord, error: attemptError } = await supabase.from("content_publish_attempts").insert({ publish_job_id: job.id, content_item_id: item.id, attempt, approved_content_hash: String(job.approved_content_hash || "legacy"), idempotency_key: String(job.idempotency_key || `${job.platform}:${item.id}`), request_payload: requestPayload }).select("id").single();
+      if (attemptError || !attemptRecord) throw attemptError || new Error("Could not create the publication attempt audit record.");
+      attemptId = String(attemptRecord.id);
+      const result = await publishContent(supabase, job as DbRecord, item);
+      const completedAt = new Date().toISOString();
+      await supabase.from("content_publish_attempts").update({ outcome: "published", response_status: result.responseStatus, response_body: result.responseBody, completed_at: completedAt }).eq("id", attemptId);
+      await supabase.from("content_publish_jobs").update({ status: "published", final_url: result.finalUrl, external_job_id: result.externalId, provider_response: result.responseBody, validation_errors: [], failure_message: null, retryable: false, next_attempt_at: null, published_at: completedAt }).eq("id", job.id);
+      published.push({ content_item_id: job.content_item_id, final_url: result.finalUrl });
     } catch (publishFailure) {
-      await supabase.from("content_publish_jobs").update({ status: "failed", failure_message: publishFailure instanceof Error ? publishFailure.message : "Publishing failed." }).eq("id", job.id);
+      const providerFailure = publishFailure instanceof PublicationProviderError ? publishFailure : null;
+      const message = publishFailure instanceof Error ? publishFailure.message : "Publishing failed.";
+      const retryable = providerFailure?.retryable !== false && attempt < Number(job.max_attempts || 5);
+      const validationErrors = providerFailure?.validationErrors || [];
+      const nextAttemptAt = retryable ? new Date(Date.now() + Math.min(60, 5 * (2 ** Math.max(0, attempt - 1))) * 60_000).toISOString() : null;
+      if (attemptId) await supabase.from("content_publish_attempts").update({ outcome: validationErrors.length ? "validation_failed" : "failed", response_status: providerFailure?.responseStatus || null, response_body: providerFailure?.responseBody || {}, error_message: message, completed_at: new Date().toISOString() }).eq("id", attemptId);
+      await supabase.from("content_publish_jobs").update({ status: "failed", failure_message: message, validation_errors: validationErrors, provider_response: providerFailure?.responseBody || {}, retryable, next_attempt_at: nextAttemptAt }).eq("id", job.id);
+      if (validationErrors.length || providerFailure?.retryable === false) {
+        await supabase.from("content_items").update({ status: "revision_requested", approval_state: "changes_requested", publication_state: "failed", failure_message: [message, ...validationErrors].filter(Boolean).join(" ") }).eq("id", item.id);
+        if (item.approval_id) await supabase.from("approvals").update({ status: "changes_requested", decision_note: [message, ...validationErrors].filter(Boolean).join(" "), decided_at: new Date().toISOString() }).eq("id", item.approval_id);
+        await supabase.from("content_review_events").insert({ content_item_id: item.id, event_type: "changes_requested", comment: [message, ...validationErrors].filter(Boolean).join(" "), reviewer_name: "Website publishing API" });
+      } else {
+        await supabase.from("content_items").update({ status: "approved", publication_state: "failed", failure_message: message }).eq("id", item.id);
+      }
     }
   }
-  return { retried: results.length, results, published };
+  return published;
 }
 
 export async function executeAutomationJob(supabase: SupabaseClient, jobType: AutomationJobType, options: { now?: Date; configuration?: DbRecord; scheduleId?: string; scheduledFor?: string } = {}) {
@@ -232,6 +263,7 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
 }
 
 export async function runDueSchedules(supabase: SupabaseClient, now = new Date()) {
+  const published = await runPublishQueue(supabase, now);
   const { data: retries, error: retryError } = await supabase.from("workflow_runs").select("*").eq("status", "retrying").lte("retry_at", now.toISOString()).lt("attempt", 5).order("retry_at");
   if (retryError) throw retryError;
   const retryResults = [];
@@ -251,5 +283,5 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
     try { results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, configuration: schedule.configuration, scheduleId: schedule.id, scheduledFor })); }
     catch (failure) { results.push({ status: "retrying", job_type: schedule.job_type, error: automationErrorMessage(failure, "Scheduled run failed.") }); }
   }
-  return [...retryResults, ...results];
+  return [{ status: "publication_queue", published }, ...retryResults, ...results];
 }

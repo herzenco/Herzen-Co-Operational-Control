@@ -41,7 +41,7 @@ Weekly packs select only the coming week's assets. Publish-day notices select th
 
 ## Publishing and reconciliation
 
-Approval queues one `content_publish_jobs` row for the selected asset. The retry worker dispatches website items to `HERZEN_WEBSITE_PUBLISH_URL` and LinkedIn items to `LUPE_LINKEDIN_PUBLISH_URL`. Both may use `PUBLISHING_WEBHOOK_SECRET`. A successful adapter response must include `final_url` or `url`; OCC writes it back to the content item and marks both the item and publish job as published.
+Website approval freezes the final website payload and queues its OCC-managed publish job. LinkedIn approval records the independent decision only; it does not notify or trigger Lupe. When Herzen asks Lupe to publish a specific approved LinkedIn item, Lupe claims `POST /api/v1/content-items/:id/linkedin-publication`, publishes the returned final copy and media through Lupe's own connection, and writes the result back with `PATCH` on the same URL. The content ID is the stable dedupe key, concurrent or repeated claims cannot publish again, and every claim/result remains in `content_publish_jobs` and `content_publish_attempts`. The OCC retry worker is website-only.
 
 ## Operations
 
