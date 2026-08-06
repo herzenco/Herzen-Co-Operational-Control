@@ -5,8 +5,11 @@ import { extname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createClient } from "@supabase/supabase-js";
 
-const DEFAULT_MANIFEST = "/Users/tito/Library/Mobile Documents/com~apple~CloudDocs/Desktop/Lupe/Operating Agents/C-3PO/Bubbles n Salt/Instagram/2026-08 August/2026-08_posts.md";
-const DEFAULT_AGENT_ROOT = "/Users/tito/Library/Mobile Documents/com~apple~CloudDocs/Desktop/Lupe/Operating Agents/C-3PO";
+const canonicalRoot = process.env.LUPE_CANONICAL_ROOT?.trim();
+const instagramRoot = process.env.BUBBLES_INSTAGRAM_ROOT?.trim()
+  || (canonicalRoot ? join(canonicalRoot, "02 Projects/Bubbles n Salt/Active/Instagram Brand") : "");
+const DEFAULT_MANIFEST = instagramRoot ? join(instagramRoot, "2026-08 August/2026-08_posts.md") : "";
+const DEFAULT_AGENT_ROOT = instagramRoot;
 
 export function parsePostManifest(markdown) {
   const source = `${markdown.trimEnd()}\n## `;
@@ -28,6 +31,7 @@ function easternDate(value) {
 }
 
 async function main() {
+  if (!instagramRoot) throw new Error("Set LUPE_CANONICAL_ROOT or BUBBLES_INSTAGRAM_ROOT to the canonical Lupe project path.");
   const apply = process.argv.includes("--apply");
   const quiet = process.argv.includes("--quiet");
   const manifestPath = process.env.BUBBLES_MANIFEST_PATH || DEFAULT_MANIFEST;

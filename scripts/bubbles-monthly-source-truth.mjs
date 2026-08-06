@@ -5,7 +5,6 @@ import { basename, extname, join, resolve } from "node:path";
 import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 
-const DEFAULT_INSTAGRAM_ROOT = "/Users/tito/Library/Mobile Documents/com~apple~CloudDocs/Desktop/Lupe/Operating Agents/C-3PO/Bubbles n Salt/Instagram";
 const STANDARD_INSTRUCTIONS = "Instagram only.\nUse the approved bordered export.\nUse the approved caption.\nUse up to 5 hashtags.\nUse the suggested posting time unless overridden.\nAfter posting, record the link and screenshot back in OCC.\nActual posting is done by Herzen.";
 
 export function dateFromBorderedFile(name, month) {
@@ -41,7 +40,10 @@ async function checksum(path) {
 async function main() {
   const apply = process.argv.includes("--apply");
   const month = process.argv.find((arg) => /^\d{4}-\d{2}$/.test(arg)) || "2026-08";
-  const instagramRoot = process.env.BUBBLES_INSTAGRAM_ROOT || DEFAULT_INSTAGRAM_ROOT;
+  const canonicalRoot = process.env.LUPE_CANONICAL_ROOT?.trim();
+  const instagramRoot = process.env.BUBBLES_INSTAGRAM_ROOT?.trim()
+    || (canonicalRoot ? join(canonicalRoot, "02 Projects/Bubbles n Salt/Active/Instagram Brand") : "");
+  if (!instagramRoot) throw new Error("Set LUPE_CANONICAL_ROOT or BUBBLES_INSTAGRAM_ROOT to the canonical Lupe project path.");
   const borderedFolder = resolve(process.env.BUBBLES_BORDERED_FOLDER || join(instagramRoot, month === "2026-08" ? "august" : month));
   const sourceFolder = resolve(process.env.BUBBLES_SOURCE_TRUTH_FOLDER || join(instagramRoot, `${month} source-of-truth`));
   const [year, monthNumber] = month.split("-").map(Number);

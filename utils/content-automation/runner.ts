@@ -25,6 +25,46 @@ async function log(supabase: SupabaseClient, runId: string, event: string, messa
   await supabase.from("workflow_run_logs").insert({ run_id: runId, level, event, message, context });
 }
 
+async function deliverWithLease(supabase: SupabaseClient, input: {
+  runId: string; type: "weekly_review_pack" | "publish_day_notice" | "lupe_check_in";
+  items: Array<{ title: string; review_url: string }>; mode?: "final_checkpoint" | "heads_up"; key: string;
+}) {
+  const payload = { ...titlesAndLinksOnly(input.items), ...(input.mode ? { mode: input.mode } : {}) };
+  const { data: job, error: jobError } = await supabase.from("content_delivery_jobs").upsert({
+    delivery_type: input.type, scheduled_for: new Date().toISOString(), payload, status: "queued",
+    run_id: input.runId, idempotency_key: input.key,
+  }, { onConflict: "idempotency_key", ignoreDuplicates: true }).select("id").maybeSingle();
+  if (jobError) throw jobError;
+  if (!job) return { status: "skipped_duplicate" };
+  const { data: claims, error: claimError } = await supabase.rpc("claim_content_delivery_job", { p_job_id: job.id, p_lease_seconds: 120 });
+  if (claimError) throw claimError;
+  const claim = Array.isArray(claims) ? claims[0] : claims;
+  if (!claim) return { status: "skipped_duplicate" };
+  let providerConfirmed = false;
+  try {
+    const delivery = await sendLupeDelivery(input.type, input.items, input.mode);
+    const provider = (delivery.provider || {}) as DbRecord;
+    const providerMessageId = String(provider.id || "");
+    providerConfirmed = true;
+    const { data: completed, error: completionError } = await supabase.rpc("complete_content_delivery_job", {
+      p_job_id: job.id, p_lease_token: claim.lease_token, p_confirmed: true,
+      p_provider_message_id: providerMessageId, p_provider_response: provider, p_error: null,
+    });
+    if (completionError || completed !== true) throw completionError || new Error("Delivery lease was lost before confirmation.");
+    return { status: "sent", provider_message_id: providerMessageId };
+  } catch (failure) {
+    // If the provider accepted the message but persistence failed, preserve the
+    // lease for quarantine/reconciliation; retrying could duplicate WhatsApp.
+    if (providerConfirmed) throw failure;
+    const message = automationErrorMessage(failure, "Delivery failed.");
+    await supabase.rpc("complete_content_delivery_job", {
+      p_job_id: job.id, p_lease_token: claim.lease_token, p_confirmed: false,
+      p_provider_message_id: null, p_provider_response: {}, p_error: message,
+    });
+    throw failure;
+  }
+}
+
 async function requireSingle(query: PromiseLike<{ data: DbRecord | null; error: { message: string } | null }>, label: string) {
   const { data, error } = await query;
   if (error || !data) throw new Error(error?.message || `${label} was not found.`);
@@ -95,8 +135,7 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
     await log(supabase, runId, "audit_failed", `${item.title} failed audit iteration ${iteration}.`, { content_item_id: item.id, seo_score: result.seo_score, aeo_score: result.aeo_score, blockers: result.blockers }, "warn");
     if (iteration % 5 === 0) {
       const payload = titlesAndLinksOnly([{ title: String(item.title), review_url: `${process.env.OCC_PUBLIC_URL || "http://localhost:3000"}/content/${item.id}` }]);
-      await supabase.from("content_delivery_jobs").insert({ delivery_type: "lupe_check_in", scheduled_for: new Date().toISOString(), payload, status: "queued" });
-      await sendLupeDelivery("lupe_check_in", payload.items);
+      await deliverWithLease(supabase, { runId, type: "lupe_check_in", items: payload.items, key: `audit-check-in:${item.id}:${iteration}` });
       await supabase.from("content_items").update({ audit_status: "check_in_required", audit_iteration_count: iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers }).eq("id", item.id);
       return { passed: false, iteration, check_in_required: true };
     }
@@ -152,7 +191,7 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
   return { generation_run_id: generationRun.id, results, evergreen_fallbacks: slate.evergreen_fallbacks };
 }
 
-async function reviewDelivery(supabase: SupabaseClient, type: "weekly_review_pack" | "publish_day_notice", now: Date, configuration: DbRecord) {
+async function reviewDelivery(supabase: SupabaseClient, runId: string, type: "weekly_review_pack" | "publish_day_notice", now: Date, configuration: DbRecord) {
   const property = await requireSingle(supabase.from("content_properties").select("id").eq("slug", String(configuration.property_slug || "herzen-co")).single(), "Herzen Co. property");
   const start = etDayStart(now);
   const end = new Date(start);
@@ -162,12 +201,8 @@ async function reviewDelivery(supabase: SupabaseClient, type: "weekly_review_pac
   const items = (data || []).map((item) => ({ title: item.title, review_url: item.review_url }));
   const unapproved = (data || []).some((item) => !["approved","scheduled","publishing","published"].includes(item.status));
   const mode = type === "publish_day_notice" ? (unapproved ? "final_checkpoint" : "heads_up") : undefined;
-  const payload = titlesAndLinksOnly(items);
-  const { data: job, error: jobError } = await supabase.from("content_delivery_jobs").insert({ delivery_type: type, scheduled_for: now.toISOString(), payload: { ...payload, mode }, status: "sending" }).select("id").single();
-  if (jobError) throw jobError;
-  const delivery = await sendLupeDelivery(type, items, mode);
-  await supabase.from("content_delivery_jobs").update({ status: "sent", sent_at: new Date().toISOString(), provider_message_id: String((delivery.provider as DbRecord | undefined)?.id || "") || null }).eq("id", job.id);
-  return { count: items.length, mode };
+  const delivery = await deliverWithLease(supabase, { runId, type, items, mode, key: `${type}:${start.toISOString()}` });
+  return { count: items.length, mode, delivery };
 }
 
 async function runK2Refresh(supabase: SupabaseClient, configuration: DbRecord) {
@@ -239,17 +274,30 @@ export async function runPublishQueue(supabase: SupabaseClient, publishNow = new
   return published;
 }
 
-export async function executeAutomationJob(supabase: SupabaseClient, jobType: AutomationJobType, options: { now?: Date; configuration?: DbRecord; scheduleId?: string; scheduledFor?: string } = {}) {
+export async function executeAutomationJob(supabase: SupabaseClient, jobType: AutomationJobType, options: { now?: Date; configuration?: DbRecord; scheduleId?: string; scheduledFor?: string; requestId?: string; triggerSource?: "scheduler" | "manual" | "retry" } = {}) {
   const now = options.now || new Date();
   const scheduledFor = options.scheduledFor || now.toISOString();
   const attempt = Number(options.configuration?._attempt || 1);
-  const { data: run, error } = await supabase.from("workflow_runs").insert({ schedule_id: options.scheduleId || null, job_type: jobType, scheduled_for: scheduledFor, status: "running", attempt, started_at: now.toISOString(), input: options.configuration || {} }).select("id").single();
+  const runKey = options.scheduleId
+    ? `schedule:${options.scheduleId}:${scheduledFor}:attempt:${attempt}`
+    : `manual:${options.requestId || crypto.randomUUID()}:${jobType}`;
+  const { data: run, error } = await supabase.from("workflow_runs").insert({
+    schedule_id: options.scheduleId || null, job_type: jobType, scheduled_for: scheduledFor,
+    status: "running", attempt, started_at: now.toISOString(), input: options.configuration || {},
+    run_key: runKey, request_id: options.requestId || null,
+    trigger_source: options.triggerSource || (options.scheduleId ? "scheduler" : "manual"),
+  }).select("id").single();
+  if (error?.code === "23505") {
+    const { data: existing } = await supabase.from("workflow_runs").select("id,status").eq("run_key", runKey).maybeSingle();
+    if (existing?.id) await log(supabase, String(existing.id), "skipped_duplicate", "A duplicate automation invocation was skipped.", { run_key: runKey, request_id: options.requestId || null }, "warn");
+    return { run_id: existing?.id || null, status: "skipped_duplicate", output: {} };
+  }
   if (error || !run) throw error || new Error("Could not persist the workflow run.");
   try {
     await log(supabase, run.id, "run_started", `${jobType} started.`);
     let output: DbRecord;
     if (jobType === "monthly_generation") output = await runMonthlyGeneration(supabase, run.id, now, options.configuration || {});
-    else if (jobType === "weekly_review_pack" || jobType === "publish_day_notice") output = await reviewDelivery(supabase, jobType, now, options.configuration || {});
+    else if (jobType === "weekly_review_pack" || jobType === "publish_day_notice") output = await reviewDelivery(supabase, run.id, jobType, now, options.configuration || {});
     else if (jobType === "audit_retry") output = await runAuditRetry(supabase, run.id, options.configuration || {});
     else output = await runK2Refresh(supabase, options.configuration || {});
     await supabase.from("workflow_runs").update({ status: "succeeded", output, finished_at: new Date().toISOString() }).eq("id", run.id);
@@ -262,7 +310,8 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
   }
 }
 
-export async function runDueSchedules(supabase: SupabaseClient, now = new Date()) {
+export async function runDueSchedules(supabase: SupabaseClient, now = new Date(), requestId = crypto.randomUUID()) {
+  await supabase.rpc("expire_content_delivery_leases");
   const published = await runPublishQueue(supabase, now);
   const { data: retries, error: retryError } = await supabase.from("workflow_runs").select("*").eq("status", "retrying").lte("retry_at", now.toISOString()).lt("attempt", 5).order("retry_at");
   if (retryError) throw retryError;
@@ -270,7 +319,7 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
   for (const retry of retries || []) {
     await supabase.from("workflow_runs").update({ status: "cancelled", finished_at: now.toISOString(), output: { retry_dispatched: true } }).eq("id", retry.id);
     const configuration = { ...(retry.input as DbRecord), _attempt: Number(retry.attempt) + 1 };
-    try { retryResults.push(await executeAutomationJob(supabase, retry.job_type as AutomationJobType, { now, configuration })); }
+    try { retryResults.push(await executeAutomationJob(supabase, retry.job_type as AutomationJobType, { now, configuration, scheduleId: retry.schedule_id || undefined, scheduledFor: retry.scheduled_for, requestId, triggerSource: "retry" })); }
     catch (failure) { retryResults.push({ status: "retrying", job_type: retry.job_type, error: automationErrorMessage(failure, "Retry failed.") }); }
   }
   const { data: schedules, error } = await supabase.from("automation_schedules").select("*").eq("enabled", true).lte("next_run_at", now.toISOString()).order("next_run_at");
@@ -279,8 +328,10 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
   for (const schedule of schedules || []) {
     const scheduledFor = schedule.next_run_at;
     const nextRunAt = nextScheduledAt(schedule.job_type as AutomationJobType, new Date(scheduledFor));
-    await supabase.from("automation_schedules").update({ next_run_at: nextRunAt }).eq("id", schedule.id);
-    try { results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, configuration: schedule.configuration, scheduleId: schedule.id, scheduledFor })); }
+    const { data: claimed, error: claimError } = await supabase.from("automation_schedules").update({ next_run_at: nextRunAt }).eq("id", schedule.id).eq("next_run_at", scheduledFor).select("id").maybeSingle();
+    if (claimError) throw claimError;
+    if (!claimed) continue;
+    try { results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, configuration: schedule.configuration, scheduleId: schedule.id, scheduledFor, requestId, triggerSource: "scheduler" })); }
     catch (failure) { results.push({ status: "retrying", job_type: schedule.job_type, error: automationErrorMessage(failure, "Scheduled run failed.") }); }
   }
   return [{ status: "publication_queue", published }, ...retryResults, ...results];

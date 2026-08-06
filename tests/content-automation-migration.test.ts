@@ -43,7 +43,8 @@ test("generation enforces blog length and a website link in LinkedIn", () => {
 test("runner rewrites failures and triggers a Lupe check-in every five attempts", () => {
   assert.match(runner, /iteration % 5 === 0/);
   assert.match(runner, /generatePair\(writer, topic, context, result\.rewrite_guidance\)/);
-  assert.match(runner, /delivery_type: "lupe_check_in"/);
+  assert.match(runner, /type: "lupe_check_in"/);
+  assert.match(runner, /deliverWithLease/);
 });
 
 test("an explicitly approved pilot can promote one evergreen fallback", () => {

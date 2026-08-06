@@ -11,8 +11,10 @@ export async function POST(request: Request) {
   if (isApiError(context)) return context;
   const body = await request.json().catch(() => ({})) as { job_type?: AutomationJobType; configuration?: Record<string, unknown> };
   if (!body.job_type || !jobTypes.has(body.job_type)) return NextResponse.json({ error: { message: "A valid job_type is required." } }, { status: 400 });
+  const requestId = request.headers.get("idempotency-key")?.trim();
+  if (!requestId) return NextResponse.json({ error: { message: "Idempotency-Key is required." } }, { status: 400 });
   try {
-    const result = await executeAutomationJob(createAutomationClient(), body.job_type, { configuration: body.configuration || {} });
+    const result = await executeAutomationJob(createAutomationClient(), body.job_type, { configuration: body.configuration || {}, requestId, triggerSource: "manual" });
     return NextResponse.json({ data: result }, { status: 202 });
   } catch (error) {
     return NextResponse.json({ error: { message: automationErrorMessage(error) } }, { status: 500 });
