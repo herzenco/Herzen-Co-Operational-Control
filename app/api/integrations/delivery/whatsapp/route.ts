@@ -5,6 +5,7 @@ export const runtime = "nodejs";
 
 const payloadSchema = z.object({
   type: z.enum(["weekly_review_pack", "publish_day_notice", "lupe_check_in"]),
+  test_label: z.literal("OCC TEST — DO NOT POST").optional(),
   mode: z.enum(["final_checkpoint", "heads_up"]).optional(),
   items: z.array(z.object({
     title: z.string().trim().min(1).max(240),
@@ -85,7 +86,7 @@ function formatMessage(payload: z.infer<typeof payloadSchema>) {
   const items = payload.items.map(
     (item, index) => `${index + 1}. ${item.title}\n${item.review_url}`,
   );
-  return [heading, ...items].join("\n\n").slice(0, 4_096);
+  return [payload.test_label, heading, ...items].filter(Boolean).join("\n\n").slice(0, 4_096);
 }
 
 async function readJson(request: Request) {
