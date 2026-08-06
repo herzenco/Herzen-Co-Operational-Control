@@ -30,12 +30,19 @@ async function deliverWithLease(supabase: SupabaseClient, input: {
   items: Array<{ title: string; review_url: string }>; mode?: "final_checkpoint" | "heads_up"; key: string;
 }) {
   const payload = { ...titlesAndLinksOnly(input.items), ...(input.mode ? { mode: input.mode } : {}) };
-  const { data: job, error: jobError } = await supabase.from("content_delivery_jobs").upsert({
+  const { data: insertedJob, error: jobError } = await supabase.from("content_delivery_jobs").upsert({
     delivery_type: input.type, scheduled_for: new Date().toISOString(), payload, status: "queued",
     run_id: input.runId, idempotency_key: input.key,
   }, { onConflict: "idempotency_key", ignoreDuplicates: true }).select("id").maybeSingle();
   if (jobError) throw jobError;
-  if (!job) return { status: "skipped_duplicate" };
+  let job = insertedJob;
+  if (!job) {
+    const { data: existingJob, error: existingJobError } = await supabase.from("content_delivery_jobs")
+      .select("id,status,next_attempt_at").eq("idempotency_key", input.key).maybeSingle();
+    if (existingJobError) throw existingJobError;
+    job = existingJob;
+  }
+  if (!job) throw new Error("The idempotent delivery job could not be loaded.");
   const { data: claims, error: claimError } = await supabase.rpc("claim_content_delivery_job", { p_job_id: job.id, p_lease_seconds: 120 });
   if (claimError) throw claimError;
   const claim = Array.isArray(claims) ? claims[0] : claims;

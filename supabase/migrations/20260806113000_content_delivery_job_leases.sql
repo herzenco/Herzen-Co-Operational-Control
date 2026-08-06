@@ -8,6 +8,11 @@ alter table public.workflow_runs
   add column if not exists request_id text,
   add column if not exists responsible_agent text not null default 'occ-content-automation';
 
+-- The Phase 1 uniqueness rule prevented a retry attempt from getting its own
+-- run row. run_key now supplies cycle-and-attempt idempotency instead.
+alter table public.workflow_runs
+  drop constraint if exists workflow_runs_schedule_id_scheduled_for_key;
+
 create unique index if not exists workflow_runs_run_key_uidx
   on public.workflow_runs(run_key) where run_key is not null;
 
@@ -27,6 +32,7 @@ alter table public.content_delivery_jobs
 alter table public.content_delivery_jobs drop constraint if exists content_delivery_jobs_status_check;
 alter table public.content_delivery_jobs add constraint content_delivery_jobs_status_check
   check (status in ('queued','sending','sent','failed','recovery_required','cancelled'));
+alter table public.content_delivery_jobs drop constraint if exists content_delivery_jobs_attempt_count_check;
 alter table public.content_delivery_jobs add constraint content_delivery_jobs_attempt_count_check
   check (attempt_count >= 0 and max_attempts > 0 and attempt_count <= max_attempts);
 
@@ -55,6 +61,7 @@ create table if not exists public.content_delivery_attempts (
 );
 
 alter table public.content_delivery_attempts enable row level security;
+drop policy if exists "active members read content_delivery_attempts" on public.content_delivery_attempts;
 create policy "active members read content_delivery_attempts" on public.content_delivery_attempts
   for select to authenticated using (exists (
     select 1 from public.operations_members member
@@ -72,6 +79,17 @@ set status = 'recovery_required',
     lease_token = null,
     lease_expires_at = null
 where status = 'sending' and lease_token is null;
+
+-- A legacy `sent` row without both pieces of confirmation evidence is
+-- ambiguous and must be reconciled rather than trusted or replayed.
+update public.content_delivery_jobs
+set status = 'recovery_required',
+    last_error = coalesce(last_error, 'Legacy sent job lacks confirmed provider evidence; reconcile before changing state.'),
+    failure_message = coalesce(failure_message, 'Legacy sent job lacks confirmed provider evidence; reconcile before changing state.'),
+    sent_at = null,
+    confirmed_at = null
+where status = 'sent'
+  and (nullif(trim(provider_message_id), '') is null or sent_at is null);
 
 create or replace function public.claim_content_delivery_job(
   p_job_id uuid,
@@ -100,9 +118,9 @@ create or replace function public.complete_content_delivery_job(
   p_provider_message_id text default null, p_provider_response jsonb default '{}'::jsonb,
   p_error text default null
 ) returns boolean language plpgsql security definer set search_path = '' as $$
-declare v_job public.content_delivery_jobs%rowtype; v_now timestamptz := now();
+declare v_now timestamptz := now();
 begin
-  select * into v_job from public.content_delivery_jobs
+  perform 1 from public.content_delivery_jobs
   where id = p_job_id and status = 'sending' and lease_token = p_lease_token for update;
   if not found then return false; end if;
   if p_confirmed and nullif(trim(p_provider_message_id), '') is null then
@@ -151,6 +169,5 @@ grant execute on function public.claim_content_delivery_job(uuid, integer) to se
 grant execute on function public.complete_content_delivery_job(uuid, uuid, boolean, text, jsonb, text) to service_role;
 grant execute on function public.expire_content_delivery_leases() to service_role;
 
--- Rollback (after draining active leases): drop the three functions and
--- content_delivery_attempts, then drop the added columns/indexes. Do not convert
--- recovery_required rows back to queued without provider reconciliation.
+-- The exact tested rollback is maintained in
+-- supabase/rollbacks/20260806113000_content_delivery_job_leases.rollback.sql.

@@ -53,6 +53,8 @@ Website approval freezes the final website payload and queues its OCC-managed pu
 6. Run one generation/review canary, one WhatsApp canary, and one approved website-publish canary. Confirm destination state and audit records.
 7. Set `CONTENT_AUTOMATION_ENABLED=true` only after canaries pass; pause safely by returning it to `false`.
 
+Rollback uses `supabase/rollbacks/20260806113000_content_delivery_job_leases.rollback.sql` only while automation is disabled and no lease is active. It removes the delivery-lease functions, attempt table, indexes, and columns while intentionally preserving both `recovery_required` classifications and scheduler run-key traceability. Restoring the older `(schedule_id, scheduled_for)` uniqueness rule would require deleting legitimate retry rows and is therefore not part of the safe rollback.
+
 ## Ownership and source-of-truth contract
 
 - Provider: Vercel Cron; account/project and named human owner must be recorded in the production change ticket.
