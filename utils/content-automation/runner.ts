@@ -28,8 +28,9 @@ async function log(supabase: SupabaseClient, runId: string, event: string, messa
 async function deliverWithLease(supabase: SupabaseClient, input: {
   runId: string; type: "weekly_review_pack" | "publish_day_notice" | "lupe_check_in";
   items: Array<{ title: string; review_url: string }>; mode?: "final_checkpoint" | "heads_up"; key: string;
+  testLabel?: "OCC TEST — DO NOT POST";
 }) {
-  const payload = { ...titlesAndLinksOnly(input.items), ...(input.mode ? { mode: input.mode } : {}) };
+  const payload = { ...titlesAndLinksOnly(input.items), ...(input.mode ? { mode: input.mode } : {}), ...(input.testLabel ? { test_label: input.testLabel } : {}) };
   const { data: insertedJob, error: jobError } = await supabase.from("content_delivery_jobs").upsert({
     delivery_type: input.type, scheduled_for: new Date().toISOString(), payload, status: "queued",
     run_id: input.runId, idempotency_key: input.key,
@@ -49,7 +50,7 @@ async function deliverWithLease(supabase: SupabaseClient, input: {
   if (!claim) return { status: "skipped_duplicate" };
   let providerConfirmed = false;
   try {
-    const delivery = await sendLupeDelivery(input.type, input.items, input.mode);
+    const delivery = await sendLupeDelivery(input.type, input.items, input.mode, input.testLabel);
     const provider = (delivery.provider || {}) as DbRecord;
     const providerMessageId = String(provider.id || "");
     providerConfirmed = true;
@@ -70,6 +71,22 @@ async function deliverWithLease(supabase: SupabaseClient, input: {
     });
     throw failure;
   }
+}
+
+export async function deliverWhatsAppCanary(supabase: SupabaseClient, input: {
+  runId: string;
+  item: { title: string; review_url: string };
+  idempotencyKey: string;
+  testLabel: "OCC TEST — DO NOT POST";
+}) {
+  if (input.testLabel !== "OCC TEST — DO NOT POST") throw new Error("The exact WhatsApp canary label is required.");
+  return deliverWithLease(supabase, {
+    runId: input.runId,
+    type: "lupe_check_in",
+    items: [input.item],
+    key: input.idempotencyKey,
+    testLabel: input.testLabel,
+  });
 }
 
 async function requireSingle(query: PromiseLike<{ data: DbRecord | null; error: { message: string } | null }>, label: string) {
@@ -188,12 +205,14 @@ async function runMonthlyGeneration(supabase: SupabaseClient, runId: string, now
     await supabase.from("content_items").update({ paired_content_item_id: blog.id }).eq("id", linkedin.id);
     await buildCanonicalPackage(supabase, blog, topic, pair.blog, "website");
     await buildCanonicalPackage(supabase, linkedin, topic, pair.linkedin, "linkedin");
-    const blogAudit = await auditUntilGate(supabase, runId, blog, pair.blog, topic, context);
-    const linkedinAudit = await auditUntilGate(supabase, runId, linkedin, pair.linkedin, topic, context);
+    const generationOnlyCanary = configuration.generation_only_canary === true;
+    const blogAudit = generationOnlyCanary ? { passed: false, generation_only: true } : await auditUntilGate(supabase, runId, blog, pair.blog, topic, context);
+    const linkedinAudit = generationOnlyCanary ? { passed: false, generation_only: true } : await auditUntilGate(supabase, runId, linkedin, pair.linkedin, topic, context);
     results.push({ topic: topic.title, blog: { id: blog.id, ...blogAudit }, linkedin: { id: linkedin.id, ...linkedinAudit } });
   }
+  const generationOnlyCanary = configuration.generation_only_canary === true;
   const allPassed = results.every((result) => result.blog.passed && result.linkedin.passed);
-  await supabase.from("content_generation_runs").update({ status: allPassed ? "ready" : "partial", completed_at: new Date().toISOString() }).eq("id", generationRun.id);
+  await supabase.from("content_generation_runs").update({ status: generationOnlyCanary ? "partial" : allPassed ? "ready" : "partial", completed_at: new Date().toISOString() }).eq("id", generationRun.id);
   await log(supabase, runId, "monthly_generation_complete", `Generated ${results.length} linked content pairs.`, { evergreen_fallbacks: slate.evergreen_fallbacks, results });
   return { generation_run_id: generationRun.id, results, evergreen_fallbacks: slate.evergreen_fallbacks };
 }

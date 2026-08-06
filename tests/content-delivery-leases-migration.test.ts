@@ -5,6 +5,7 @@ import test from "node:test";
 const migration = readFileSync(new URL("../supabase/migrations/20260806113000_content_delivery_job_leases.sql", import.meta.url), "utf8");
 const runner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
 const delivery = readFileSync(new URL("../utils/content-automation/delivery.ts", import.meta.url), "utf8");
+const whatsappRoute = readFileSync(new URL("../app/api/integrations/delivery/whatsapp/route.ts", import.meta.url), "utf8");
 const cronRoute = readFileSync(new URL("../app/api/cron/content-automation/route.ts", import.meta.url), "utf8");
 const rollback = readFileSync(new URL("../supabase/rollbacks/20260806113000_content_delivery_job_leases.rollback.sql", import.meta.url), "utf8");
 
@@ -51,4 +52,13 @@ test("an executable rollback removes delivery leases without deleting retry hist
   assert.match(rollback, /drop column if exists lease_token/);
   assert.doesNotMatch(rollback, /drop column if exists run_key/);
   assert.doesNotMatch(rollback, /add constraint workflow_runs_schedule_id_scheduled_for_key/);
+});
+
+test("canaries are explicitly generation-only and clearly labeled", () => {
+  assert.match(runner, /generation_only_canary/);
+  assert.match(runner, /generationOnlyCanary \? \{ passed: false, generation_only: true \}/);
+  assert.match(runner, /deliverWhatsAppCanary/);
+  assert.match(delivery, /test_label: testLabel/);
+  assert.match(whatsappRoute, /z\.literal\("OCC TEST — DO NOT POST"\)/);
+  assert.match(whatsappRoute, /\[payload\.test_label, heading, \.\.\.items\]/);
 });
