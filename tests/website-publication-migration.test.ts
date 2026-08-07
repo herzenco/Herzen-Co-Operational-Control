@@ -77,5 +77,6 @@ test("the worker sends the approved payload and audits each provider attempt", (
   assert.match(runner, /content_publish_attempts/);
   assert.match(runner, /eq\("platform", "website"\)/);
   assert.match(runner, /Recovered a stale publishing lease/);
-  assert.match(runner, /runDueSchedules[\s\S]*runPublishQueue\(supabase, now\)/);
+  assert.match(runner, /runDueSchedules[\s\S]*const published: Array<Record<string, unknown>> = \[\]/);
+  assert.doesNotMatch(runner, /runDueSchedules[\s\S]*await runPublishQueue\(supabase, now\)/);
 });

@@ -5,8 +5,9 @@ import { generatePair, planMonthlySlate, promoteEvergreenFallback } from "./gene
 import { loadLearningContext } from "./learning-context";
 import { AnthropicJsonModel, OpenAIJsonModel } from "./models";
 import { createReviewLink } from "./review-links";
+import { disabledAutomationResult, isLegacyContentAutomationJobType, LegacyContentAutomationDisabledError } from "./retirement";
 import { buildCanonicalPackage, readyQaChecklist } from "./packages";
-import { etDayStart, nextMonthStart, nextScheduledAt } from "./schedule";
+import { etDayStart, nextMonthStart } from "./schedule";
 import type { AutomationJobType, GeneratedAsset, PlannedTopic } from "./types";
 import { PublicationProviderError, publishContent } from "./publishing";
 
@@ -301,6 +302,9 @@ export async function runPublishQueue(supabase: SupabaseClient, publishNow = new
 }
 
 export async function executeAutomationJob(supabase: SupabaseClient, jobType: AutomationJobType, options: { now?: Date; configuration?: DbRecord; scheduleId?: string; scheduledFor?: string; requestId?: string; triggerSource?: "scheduler" | "manual" | "retry" } = {}) {
+  if (isLegacyContentAutomationJobType(jobType)) {
+    throw new LegacyContentAutomationDisabledError("runner", jobType);
+  }
   const now = options.now || new Date();
   const scheduledFor = options.scheduledFor || now.toISOString();
   const attempt = Number(options.configuration?._attempt || 1);
@@ -337,28 +341,23 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
 }
 
 export async function runDueSchedules(supabase: SupabaseClient, now = new Date(), requestId = crypto.randomUUID()) {
-  await supabase.rpc("expire_content_delivery_leases");
-  const published = await runPublishQueue(supabase, now);
+  void requestId;
+  const published: Array<Record<string, unknown>> = [];
   const { data: retries, error: retryError } = await supabase.from("workflow_runs").select("*").eq("status", "retrying").lte("retry_at", now.toISOString()).lt("attempt", 5).order("retry_at");
   if (retryError) throw retryError;
-  const retryResults = [];
-  for (const retry of retries || []) {
-    await supabase.from("workflow_runs").update({ status: "cancelled", finished_at: now.toISOString(), output: { retry_dispatched: true } }).eq("id", retry.id);
-    const configuration = { ...(retry.input as DbRecord), _attempt: Number(retry.attempt) + 1 };
-    try { retryResults.push(await executeAutomationJob(supabase, retry.job_type as AutomationJobType, { now, configuration, scheduleId: retry.schedule_id || undefined, scheduledFor: retry.scheduled_for, requestId, triggerSource: "retry" })); }
-    catch (failure) { retryResults.push({ status: "retrying", job_type: retry.job_type, error: automationErrorMessage(failure, "Retry failed.") }); }
-  }
+  const retryResults = (retries || []).map((retry) => ({
+    status: "disabled",
+    run_id: retry.id,
+    retry_at: retry.retry_at,
+    ...disabledAutomationResult("runner", String(retry.job_type || "")),
+  }));
   const { data: schedules, error } = await supabase.from("automation_schedules").select("*").eq("enabled", true).lte("next_run_at", now.toISOString()).order("next_run_at");
   if (error) throw error;
-  const results = [];
-  for (const schedule of schedules || []) {
-    const scheduledFor = schedule.next_run_at;
-    const nextRunAt = nextScheduledAt(schedule.job_type as AutomationJobType, new Date(scheduledFor));
-    const { data: claimed, error: claimError } = await supabase.from("automation_schedules").update({ next_run_at: nextRunAt }).eq("id", schedule.id).eq("next_run_at", scheduledFor).select("id").maybeSingle();
-    if (claimError) throw claimError;
-    if (!claimed) continue;
-    try { results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, configuration: schedule.configuration, scheduleId: schedule.id, scheduledFor, requestId, triggerSource: "scheduler" })); }
-    catch (failure) { results.push({ status: "retrying", job_type: schedule.job_type, error: automationErrorMessage(failure, "Scheduled run failed.") }); }
-  }
+  const results = (schedules || []).map((schedule) => ({
+    status: "disabled",
+    schedule_id: schedule.id,
+    scheduled_for: schedule.next_run_at,
+    ...disabledAutomationResult("cron_route", String(schedule.job_type || "")),
+  }));
   return [{ status: "publication_queue", published }, ...retryResults, ...results];
 }

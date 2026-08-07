@@ -1,5 +1,11 @@
 # Lupe Operations API
 
+Supersession note:
+
+- `Herzen Co. Monthly Content Operations` is the only future-state Herzen Co. content workflow.
+- Any API route, prompt, or table field that still references the former Content Engine is historical or transitional, not authoritative.
+- OCC does not communicate directly through Meta or WhatsApp in the current operating model.
+
 The Herzen Co. Operations API gives Lupe complete programmatic visibility and
 operator control over the Operations Control Center.
 
