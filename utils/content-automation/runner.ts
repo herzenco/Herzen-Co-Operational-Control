@@ -54,12 +54,12 @@ async function deliverWithLease(supabase: SupabaseClient, input: {
     const provider = (delivery.provider || {}) as DbRecord;
     const providerMessageId = String(provider.id || "");
     providerConfirmed = true;
-    const { data: completed, error: completionError } = await supabase.rpc("complete_content_delivery_job", {
-      p_job_id: job.id, p_lease_token: claim.lease_token, p_confirmed: true,
-      p_provider_message_id: providerMessageId, p_provider_response: provider, p_error: null,
+    const { data: accepted, error: acceptanceError } = await supabase.rpc("accept_content_delivery_job", {
+      p_job_id: job.id, p_lease_token: claim.lease_token,
+      p_provider_message_id: providerMessageId, p_provider_response: provider,
     });
-    if (completionError || completed !== true) throw completionError || new Error("Delivery lease was lost before confirmation.");
-    return { status: "sent", provider_message_id: providerMessageId };
+    if (acceptanceError || accepted !== true) throw acceptanceError || new Error("Delivery lease was lost before provider acceptance was recorded.");
+    return { status: "accepted", provider_message_id: providerMessageId };
   } catch (failure) {
     // If the provider accepted the message but persistence failed, preserve the
     // lease for quarantine/reconciliation; retrying could duplicate WhatsApp.
@@ -87,6 +87,41 @@ export async function deliverWhatsAppCanary(supabase: SupabaseClient, input: {
     key: input.idempotencyKey,
     testLabel: input.testLabel,
   });
+}
+
+export async function executeWhatsAppCanary(supabase: SupabaseClient, requestId: string) {
+  const runKey = `manual:${requestId}:whatsapp_canary`;
+  const { data: run, error } = await supabase.from("workflow_runs").insert({
+    job_type: "whatsapp_canary",
+    scheduled_for: new Date().toISOString(),
+    status: "running",
+    attempt: 1,
+    started_at: new Date().toISOString(),
+    input: { canary: true, label: "OCC TEST — DO NOT POST" },
+    run_key: runKey,
+    request_id: requestId,
+    trigger_source: "manual",
+  }).select("id").single();
+  if (error?.code === "23505") {
+    const { data: existing } = await supabase.from("workflow_runs").select("id,status,output").eq("run_key", runKey).maybeSingle();
+    return { run_id: existing?.id || null, status: "skipped_duplicate", output: existing?.output || {} };
+  }
+  if (error || !run) throw error || new Error("Could not create the WhatsApp canary run.");
+  try {
+    const delivery = await deliverWhatsAppCanary(supabase, {
+      runId: run.id,
+      item: { title: "Production delivery verification only", review_url: process.env.OCC_PUBLIC_URL || "https://operations.herzenco.co" },
+      idempotencyKey: `whatsapp-canary:${requestId}`,
+      testLabel: "OCC TEST — DO NOT POST",
+    });
+    const output = { canary: true, delivery };
+    await supabase.from("workflow_runs").update({ status: "succeeded", output, finished_at: new Date().toISOString() }).eq("id", run.id);
+    return { run_id: run.id, status: "succeeded", output };
+  } catch (failure) {
+    const message = automationErrorMessage(failure);
+    await supabase.from("workflow_runs").update({ status: "failed", last_error: message, finished_at: new Date().toISOString() }).eq("id", run.id);
+    throw failure;
+  }
 }
 
 async function requireSingle(query: PromiseLike<{ data: DbRecord | null; error: { message: string } | null }>, label: string) {

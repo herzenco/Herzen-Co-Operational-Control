@@ -11,8 +11,8 @@ export async function sendLupeDelivery(type: "weekly_review_pack" | "publish_day
   const response = await fetch(endpoint, { method: "POST", headers: { "Content-Type": "application/json", ...(process.env.LUPE_DELIVERY_WEBHOOK_SECRET ? { Authorization: `Bearer ${process.env.LUPE_DELIVERY_WEBHOOK_SECRET}` } : {}) }, body: JSON.stringify(payload) });
   const provider = await response.json().catch(() => ({})) as Record<string, unknown>;
   if (!response.ok) throw new Error(`Lupe delivery failed (${response.status}).`);
-  if (provider.delivered !== true || !String(provider.id || "").trim()) {
-    throw new Error("Lupe delivery webhook did not confirm a provider message ID.");
+  if (provider.accepted !== true || provider.delivered === true || !String(provider.id || "").trim()) {
+    throw new Error("Lupe delivery webhook did not confirm nonterminal provider acceptance and a message ID.");
   }
   return { queued: false, payload, provider };
 }
