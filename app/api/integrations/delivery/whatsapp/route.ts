@@ -69,7 +69,8 @@ export async function POST(request: Request) {
     messages?: Array<{ id?: string }>;
   };
   return Response.json({
-    delivered: true,
+    accepted: true,
+    delivered: false,
     id: provider.messages?.[0]?.id || null,
     item_count: parsed.data.items.length,
   });

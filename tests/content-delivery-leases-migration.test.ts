@@ -29,7 +29,8 @@ test("delivery claims and completions are lease-token guarded and audited", () =
 });
 
 test("delivery requires explicit provider confirmation", () => {
-  assert.match(delivery, /provider\.delivered !== true/);
+  assert.match(delivery, /provider\.accepted !== true/);
+  assert.match(delivery, /provider\.delivered === true/);
   assert.match(delivery, /provider\.id/);
   assert.doesNotMatch(delivery, /if \(!endpoint\) return/);
 });

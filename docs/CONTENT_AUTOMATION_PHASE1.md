@@ -37,7 +37,9 @@ Each passing asset receives a random 256-bit review token. Only its SHA-256 hash
 
 ## Delivery
 
-Weekly packs select only the coming week's assets. Publish-day notices select that day's assets. Both use `titlesAndLinksOnly`, so delivery payloads contain no draft copy. An unapproved day-of item is labeled `final_checkpoint`; an approved item is labeled `heads_up`. Every job is queued with an idempotency key and atomically claimed with a lease. It becomes `sent` only when the authenticated webhook returns `delivered: true` and a provider message ID. Failures retain attempt/error/retry data. Expired or legacy `sending` rows become `recovery_required`, never automatic retries, because the provider may already have accepted the message.
+Weekly packs select only the coming week's assets. Publish-day notices select that day's assets. Both use `titlesAndLinksOnly`, so delivery payloads contain no draft copy. An unapproved day-of item is labeled `final_checkpoint`; an approved item is labeled `heads_up`. Every job is queued with an idempotency key and atomically claimed with a lease. Meta's initial acceptance and provider message ID leave the job in `sending`; only a signed `delivered` or `read` webhook receipt may move it to `sent`. Provider-reported failure or an expired receipt lease enters `recovery_required`, never an automatic replay.
+
+The Meta app must send WhatsApp status callbacks to `/api/integrations/delivery/whatsapp/status`. GET verification uses `WHATSAPP_WEBHOOK_VERIFY_TOKEN`; POST callbacks must carry a valid `X-Hub-Signature-256` HMAC verified with `WHATSAPP_APP_SECRET`. These server-only variables must be Production-scoped and must never be exposed to Preview.
 
 ## Publishing and reconciliation
 
