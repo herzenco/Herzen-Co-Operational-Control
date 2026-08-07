@@ -1,5 +1,9 @@
 # Herzen Co. content automation — Phase 1
 
+Superseded on `2026-08-07`.
+
+This file is retained as historical technical evidence for the former phase-1 content automation build. It is not the active operating standard. Current canonical operations follow `Herzen Co. Monthly Content Operations` in the Lupe folder. Until the new workflow is explicitly activated, the legacy `content-automation` execution routes and schedules must remain disabled.
+
 Phase 1 adds a persisted monthly generation, audit, review, delivery, and publishing loop to OCC. Blog and LinkedIn assets are always separate `content_items` joined by `content_pairs`; each receives its own audit history, approval state, secure review URL, publishing job, and final URL.
 
 ## Jobs and scheduling

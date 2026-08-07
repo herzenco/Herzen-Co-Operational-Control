@@ -28,17 +28,17 @@ test("delivery claims and completions are lease-token guarded and audited", () =
   assert.match(runner, /eq\("idempotency_key", input\.key\)/);
 });
 
-test("delivery requires explicit provider confirmation", () => {
-  assert.match(delivery, /provider\.delivered !== true/);
-  assert.match(delivery, /provider\.id/);
-  assert.doesNotMatch(delivery, /if \(!endpoint\) return/);
+test("direct delivery remains fail-closed after provider-confirmation retirement", () => {
+  assert.match(delivery, /disabledAutomationResult\("whatsapp_delivery"/);
+  assert.doesNotMatch(delivery, /await fetch/);
+  assert.match(whatsappRoute, /status: 410/);
 });
 
-test("scheduler is paused by default and runs are idempotent", () => {
-  assert.match(cronRoute, /CONTENT_AUTOMATION_ENABLED !== "true"/);
+test("scheduler is retired and historical run keys remain idempotent", () => {
+  assert.match(cronRoute, /disabledAutomationResult\("cron_route"\)/);
+  assert.doesNotMatch(cronRoute, /runDueSchedules/);
   assert.match(migration, /workflow_runs_run_key_uidx/);
   assert.match(runner, /skipped_duplicate/);
-  assert.match(runner, /eq\("next_run_at", scheduledFor\)/);
 });
 
 test("workflow retries replace the incompatible Phase 1 uniqueness rule", () => {
@@ -54,11 +54,10 @@ test("an executable rollback removes delivery leases without deleting retry hist
   assert.doesNotMatch(rollback, /add constraint workflow_runs_schedule_id_scheduled_for_key/);
 });
 
-test("canaries are explicitly generation-only and clearly labeled", () => {
+test("historical generation canary remains isolated while direct WhatsApp canaries are retired", () => {
   assert.match(runner, /generation_only_canary/);
   assert.match(runner, /generationOnlyCanary \? \{ passed: false, generation_only: true \}/);
   assert.match(runner, /deliverWhatsAppCanary/);
-  assert.match(delivery, /test_label: testLabel/);
-  assert.match(whatsappRoute, /z\.literal\("OCC TEST — DO NOT POST"\)/);
-  assert.match(whatsappRoute, /\[payload\.test_label, heading, \.\.\.items\]/);
+  assert.match(delivery, /disabledAutomationResult\("whatsapp_delivery"/);
+  assert.doesNotMatch(whatsappRoute, /OCC TEST — DO NOT POST/);
 });
