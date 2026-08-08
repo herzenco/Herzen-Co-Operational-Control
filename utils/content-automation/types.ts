@@ -4,12 +4,29 @@ export type AuditResult = {
   provider: "manus" | "anthropic";
   seo_score: number;
   aeo_score: number;
+  seo_explanation: string;
+  aeo_explanation: string;
   passed: boolean;
   summary: string;
   blockers: string[];
   rewrite_guidance: string;
+  model: string;
+  rubric_version: string;
+  trace_id: string;
+  evaluated_at: string;
   raw_response?: Record<string, unknown>;
 };
+
+export type ModelTrace = {
+  provider: "openai" | "anthropic";
+  model: string;
+  prompt_version: string;
+  trace_id: string;
+  provider_request_id: string | null;
+  completed_at: string;
+};
+
+export type TracedGeneration<T> = { value: T; trace: ModelTrace };
 
 export type PlannedTopic = {
   topic_key: string;
@@ -37,6 +54,7 @@ export type GenerationPair = { blog: GeneratedAsset; linkedin: GeneratedAsset };
 
 export interface JsonModel {
   generate<T>(system: string, prompt: string): Promise<T>;
+  generateTraced?<T>(system: string, prompt: string, promptVersion: string): Promise<TracedGeneration<T>>;
 }
 
 export interface Auditor {
@@ -45,4 +63,3 @@ export interface Auditor {
 }
 
 export type DeliveryItem = { title: string; review_url: string };
-

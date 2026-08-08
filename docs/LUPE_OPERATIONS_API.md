@@ -6,6 +6,9 @@ Supersession note:
 - Any API route, prompt, or table field that still references the former Content Engine is historical or transitional, not authoritative.
 - OCC does not communicate directly through Meta or WhatsApp in the current operating model.
 
+For the manual, unpublished Monthly Content Operations validation lane, see
+[`MONTHLY_CONTENT_OPERATIONS_SHADOW.md`](./MONTHLY_CONTENT_OPERATIONS_SHADOW.md).
+
 The Herzen Co. Operations API gives Lupe complete programmatic visibility and
 operator control over the Operations Control Center.
 
