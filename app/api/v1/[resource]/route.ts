@@ -21,7 +21,7 @@ export async function GET(request: Request, { params }: RouteContext) {
   let query = context.supabase
     .from(resource.table)
     .select("*", { count: "exact" })
-    .order(resource.defaultOrder, { ascending: false })
+    .order(resource.defaultOrder, { ascending: resource.defaultAscending ?? false, nullsFirst: resource.nullsFirst })
     .range(offset, offset + limit - 1);
 
   if (resourceName === "content-items") {
