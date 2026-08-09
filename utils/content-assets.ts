@@ -1,3 +1,5 @@
+import { workItemUrl } from "./work-item-links";
+
 export const CONTENT_CREATIVE_BUCKET = "content-creative-assets";
 
 export type ContentCreativeAttachment = {
@@ -78,6 +80,15 @@ export function serializeContentRecord(record: ContentRecord): ContentRecord {
 }
 
 export function serializeApiResource(resourceName: string, value: unknown): unknown {
+  if (resourceName === "agent-work-items") {
+    const serializeWorkItem = (record: ContentRecord) => ({
+      ...record,
+      human_url: workItemUrl(String(record.id)),
+    });
+    if (Array.isArray(value)) return value.map((record) => serializeWorkItem(record as ContentRecord));
+    if (value && typeof value === "object") return serializeWorkItem(value as ContentRecord);
+    return value;
+  }
   if (resourceName !== "content-items") return value;
   if (Array.isArray(value)) return value.map((record) => serializeContentRecord(record as ContentRecord));
   if (value && typeof value === "object") return serializeContentRecord(value as ContentRecord);
