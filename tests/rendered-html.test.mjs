@@ -30,6 +30,12 @@ test("protects the Operations Control Center behind company login", async () => 
   assert.equal(new URL(response.headers.get("location")).pathname, "/login");
 });
 
+test("protects human work-item pages with the same company login", async () => {
+  const response = await render("/work-items/46a40266-cd0d-48d5-a71a-41b63d88f43d");
+  assert.equal(response.status, 307);
+  assert.equal(new URL(response.headers.get("location")).pathname, "/login");
+});
+
 test("server-renders the Herzen Co. company login", async () => {
   const response = await render("/login");
   assert.equal(response.status, 200);
