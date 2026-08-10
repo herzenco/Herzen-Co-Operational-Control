@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
+import { CreativeAssets } from "./creative-assets";
 import {
   AgentMark,
   LiveLabel,
@@ -15,7 +16,7 @@ import {
 import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
 import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
 
-type View = "command" | "kanban" | "list" | "worklogs" | "content" | "agentops" | "leads" | "approvals" | "workflows";
+type View = "command" | "kanban" | "list" | "worklogs" | "content" | "creative" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
 
 type Viewer = {
@@ -130,6 +131,7 @@ const VIEWS: Array<{ id: View; label: string }> = [
   { id: "list", label: "List" },
   { id: "worklogs", label: "Work Logs" },
   { id: "content", label: "Content" },
+  { id: "creative", label: "Creative Intake" },
   { id: "agentops", label: "Agent Ops" },
   { id: "leads", label: "Leads" },
   { id: "approvals", label: "Approvals" },
@@ -1530,6 +1532,7 @@ export function CommandCenter() {
           {view === "kanban" && renderKanban()}
           {view === "worklogs" && renderWorkLogs()}
           {view === "content" && renderContent()}
+          {view === "creative" && session?.access_token && <CreativeAssets accessToken={session.access_token} onError={setError} />}
           {view === "agentops" && renderAgentOps()}
           {view === "leads" && renderLeads()}
           {view === "approvals" && renderApprovals()}
