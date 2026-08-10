@@ -7,7 +7,7 @@ import { executeAutomationJob } from "../../../../../utils/content-automation/ru
 const jobTypes = new Set<AutomationJobType>([...legacyContentAutomationJobTypes, "monthly_content_item", "monthly_content_watchdog"]);
 
 export async function POST(request: Request) {
-  const context = await requireMember(request, { write: true });
+  const context = await requireMember(request, { write: true, allowAgentWrite: true });
   if (isApiError(context)) return context;
   const body = await request.json().catch(() => ({})) as { job_type?: AutomationJobType; configuration?: Record<string, unknown> };
   if (!body.job_type || !jobTypes.has(body.job_type)) return NextResponse.json({ error: { message: "A valid job_type is required." } }, { status: 400 });
