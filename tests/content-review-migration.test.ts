@@ -59,3 +59,8 @@ test("desktop preview renders a post mockup with caption and decisions", () => {
   assert.match(commandCenter, /contentPostCaption/);
   assert.match(styles, /\.contentPostMockup/);
 });
+
+test("stable review URLs open the exact authenticated content preview", () => {
+  assert.match(commandCenter, /new URLSearchParams\(window\.location\.search\)\.get\("content_item"\)/);
+  assert.match(commandCenter, /setDrawer\("contentPreview"\)/);
+});

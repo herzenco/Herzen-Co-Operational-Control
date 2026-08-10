@@ -333,6 +333,16 @@ export function CommandCenter() {
   }, [session]);
 
   useEffect(() => {
+    const contentItemId = new URLSearchParams(window.location.search).get("content_item");
+    if (!contentItemId || !contentItems.length) return;
+    const linkedItem = contentItems.find((item) => String(item.id) === contentItemId);
+    if (!linkedItem) return;
+    setView("content");
+    setSelectedContent(linkedItem);
+    setDrawer("contentPreview");
+  }, [contentItems]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => {
       setTodayLabel(new Intl.DateTimeFormat("en-US", {
         weekday: "long",
