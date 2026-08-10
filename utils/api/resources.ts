@@ -25,6 +25,7 @@ export type ResourceName =
   | "content-generation-runs"
   | "content-pairs"
   | "content-audits"
+  | "content-rewrite-iterations"
   | "content-review-events"
   | "automation-schedules"
   | "workflow-runs"
@@ -169,9 +170,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   },
   "agent-work-items": {
     table: "agent_work_items", mutable: true,
-    createFields: ["agent_id", "work_item_type", "title", "body", "summary", "attachments", "status", "content_item_id", "campaign_id", "project_id", "lane", "notes"],
+    createFields: ["agent_id", "work_item_type", "title", "body", "summary", "attachments", "status", "content_item_id", "campaign_id", "project_id", "lane", "notes", "request_id", "idempotency_key"],
     updateFields: ["agent_id", "work_item_type", "title", "body", "summary", "attachments", "status", "content_item_id", "campaign_id", "project_id", "lane", "notes"],
-    filters: ["agent_id", "work_item_type", "status", "content_item_id", "campaign_id", "project_id", "lane"], defaultOrder: "updated_at",
+    filters: ["agent_id", "work_item_type", "status", "content_item_id", "campaign_id", "project_id", "lane", "request_id", "idempotency_key"], defaultOrder: "updated_at",
   },
   "agent-work-dependencies": {
     table: "agent_work_dependencies", mutable: true,
@@ -220,9 +221,10 @@ export const resources: Record<ResourceName, ResourceConfig> = {
     updateFields: ["scheduled_for", "payload", "status", "sent_at", "provider_message_id", "failure_message"],
     filters: ["content_item_id", "approval_id", "channel", "status"], defaultOrder: "scheduled_for",
   },
-  "content-generation-runs": { table: "content_generation_runs", mutable: false, createFields: [], updateFields: [], filters: ["property_id", "month_start", "status"], defaultOrder: "created_at" },
+  "content-generation-runs": { table: "content_generation_runs", mutable: false, createFields: [], updateFields: [], filters: ["property_id", "month_start", "status", "request_id", "idempotency_key", "run_kind"], defaultOrder: "created_at" },
   "content-pairs": { table: "content_pairs", mutable: false, createFields: [], updateFields: [], filters: ["generation_run_id", "blog_content_item_id", "linkedin_content_item_id"], defaultOrder: "created_at" },
   "content-audits": { table: "content_audits", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "provider", "passed"], defaultOrder: "created_at" },
+  "content-rewrite-iterations": { table: "content_rewrite_iterations", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "iteration"], defaultOrder: "created_at" },
   "content-review-events": { table: "content_review_events", mutable: true, createFields: ["content_item_id", "event_type", "comment", "reviewer_name", "reviewer_email"], updateFields: ["event_type", "comment", "triaged_by_agent_id"], filters: ["content_item_id", "event_type", "triaged_by_agent_id"], defaultOrder: "created_at" },
   "automation-schedules": { table: "automation_schedules", mutable: true, createFields: ["job_type", "timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], updateFields: ["timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], filters: ["job_type", "enabled"], defaultOrder: "next_run_at" },
   "workflow-runs": { table: "workflow_runs", mutable: false, createFields: [], updateFields: [], filters: ["schedule_id", "generation_run_id", "job_type", "status"], defaultOrder: "created_at" },

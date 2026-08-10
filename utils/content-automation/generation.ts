@@ -1,4 +1,6 @@
-import type { GenerationPair, JsonModel, PlannedTopic } from "./types";
+import type { GenerationPair, JsonModel, PlannedTopic, TracedGeneration } from "./types";
+
+export const MONTHLY_SHADOW_PROMPT_VERSION = "monthly-shadow-generation-v1";
 
 const VOICE = "Founder-led, direct, sharp, useful, and energetic. No political stances. No giveaways or discounts unless the supplied context explicitly approves them.";
 
@@ -31,6 +33,15 @@ export async function generatePair(model: JsonModel, topic: PlannedTopic, contex
     JSON.stringify({ topic, context, website_url: `${process.env.HERZEN_WEBSITE_URL || "https://herzen.co"}/${topic.topic_key}`, rewrite_guidance: rewriteGuidance }),
   );
   return enforcePair(pair);
+}
+
+export async function generateShadowPair(model: JsonModel, topic: PlannedTopic, context: Record<string, unknown>, editorialBrief: string, rewriteGuidance = ""): Promise<TracedGeneration<GenerationPair>> {
+  const system = `You are C-3PO, Herzen Co.'s editorial and packaging specialist. Write one website blog and one related but independently approvable LinkedIn post as separate unpublished shadow assets. ${VOICE} Blog length is 400-1500 words. The LinkedIn post must include the supplied planned website URL. Use the approved K2 research and the editorial brief. Do not include publishing instructions or claim that anything is approved, scheduled, or live. Return JSON with blog and linkedin objects containing title, body, caption, slug, seo_title, meta_description, reasoning_summary.`;
+  const prompt = JSON.stringify({ topic, approved_k2_research: context, editorial_brief: editorialBrief, website_url: `${process.env.HERZEN_WEBSITE_URL || "https://herzen.co"}/${topic.topic_key}`, rewrite_guidance: rewriteGuidance });
+  const generated = model.generateTraced
+    ? await model.generateTraced<GenerationPair>(system, prompt, MONTHLY_SHADOW_PROMPT_VERSION)
+    : { value: await model.generate<GenerationPair>(system, prompt), trace: { provider: "openai" as const, model: "unknown", prompt_version: MONTHLY_SHADOW_PROMPT_VERSION, trace_id: crypto.randomUUID(), provider_request_id: null, completed_at: new Date().toISOString() } };
+  return { ...generated, value: enforcePair(generated.value) };
 }
 
 export { blogWordCount, enforcePair };
