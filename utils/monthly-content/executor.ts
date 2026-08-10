@@ -70,7 +70,20 @@ function currentAsset(item: Row): GeneratedAsset {
     seo_title: item.seo_title || item.title, meta_description: item.meta_description || "", reasoning_summary: item.reasoning_summary || "" };
 }
 
-async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform: "website" | "linkedin") {
+async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform: "website" | "linkedin", k2Id: string) {
+  let researchRecordId = item.research_record_id as string | undefined;
+  if (!researchRecordId) {
+    const { data: research, error: researchError } = await supabase.from("content_research_records").insert({
+      content_item_id: item.id, researcher_agent_id: k2Id,
+      what_is_happening: item.research_brief?.angle || item.brief || item.title,
+      why_it_fits_account: item.research_brief?.audience || item.target_audience || "Herzen Co. audience",
+      how_and_why_it_fits_feed: `Independent ${platform} content operation backed by the preserved research brief.`,
+      current_trend_or_context: JSON.stringify(item.research_brief?.source_links || item.source_links || []),
+      caption_angle: item.reasoning_summary || item.brief || item.title, suggested_posting_time: "09:00", status: "final", finalized_at: new Date().toISOString(),
+    }).select("id").single();
+    if (researchError || !research) throw researchError || new Error("Canonical K2 research could not be persisted.");
+    researchRecordId = research.id;
+  }
   let sourceId = item.source_asset_id as string | undefined;
   let deliveryId = item.delivery_asset_id as string | undefined;
   if (!sourceId || !deliveryId) {
@@ -85,9 +98,9 @@ async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform
     deliveryId = data.find((asset) => asset.asset_role === "delivery")?.id;
   }
   const manifest = { ...(item.package_manifest || {}), caption: item.caption || item.body, source_asset_id: sourceId, delivery_asset_id: deliveryId, publishing_enabled: false };
-  const { error } = await supabase.from("content_items").update({ source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest }).eq("id", item.id);
+  const { error } = await supabase.from("content_items").update({ research_record_id: researchRecordId, source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest }).eq("id", item.id);
   if (error) throw error;
-  Object.assign(item, { source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest });
+  Object.assign(item, { research_record_id: researchRecordId, source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest });
 }
 
 async function ensureLupeWorkItem(supabase: SupabaseClient, item: Row, lupeId: string) {
@@ -165,7 +178,7 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
             await transition(supabase, item, "recovery_required", { actor: "Anthropic", reason: "QA iteration ceiling reached.", jobId: job.id, nextAction: "Lupe resolves the QA blocker.", ownerAgentId: identity.Lupe, retryCount: iteration });
           } else await transition(supabase, item, "revision_required", { actor: "Anthropic", reason: `QA gate failed (${result.seo_score}/${result.aeo_score}); revision required.`, jobId: job.id, nextAction: "OpenAI applies QA guidance.", retryCount: iteration, evidence: result.blockers });
         } else {
-          await ensureReviewPackage(supabase, item, platform);
+          await ensureReviewPackage(supabase, item, platform, identity.K2);
           const humanUrl = `${process.env.OCC_PUBLIC_URL || "http://localhost:3000"}/?content_item=${item.id}`;
           await supabase.from("content_items").update({ human_review_url: humanUrl, review_url: humanUrl, review_ready_at: new Date().toISOString() }).eq("id", item.id);
           item.human_review_url = humanUrl;
