@@ -7,6 +7,15 @@ import { resolveContentPropertyScope } from "../../../../utils/api/content-prope
 
 type RouteContext = { params: Promise<{ resource: string }> };
 
+const machineWritableResources = new Set([
+  "tasks",
+  "content-items",
+  "content-assets",
+  "agent-work-items",
+  "agent-work-dependencies",
+  "content-feedback",
+]);
+
 export async function GET(request: Request, { params }: RouteContext) {
   const { resource: resourceName } = await params;
   const resource = getResource(resourceName);
@@ -59,7 +68,7 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: ["content-items", "content-assets", "agent-work-items", "agent-work-dependencies", "content-feedback"].includes(resourceName),
+    allowAgentWrite: machineWritableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
 
