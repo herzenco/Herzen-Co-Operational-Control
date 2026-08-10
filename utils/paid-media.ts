@@ -30,5 +30,17 @@ export function validateCreative(input: Record<string, unknown>) {
   const variants = Array.isArray(input.variants) ? input.variants : [];
   if (type === "RSA" && !variants.some((v) => typeof v === "object" && v && (v as Record<string, unknown>).variant_type === "headline")) errors.push("RSA assets require at least one headline.");
   if (type === "structured_snippet" && !variants.some((v) => typeof v === "object" && v && (v as Record<string, unknown>).variant_type === "snippet_value")) errors.push("Structured snippets require at least one value.");
+  for (const variant of variants) {
+    if (typeof variant !== "object" || !variant) continue;
+    const value = variant as Record<string, unknown>;
+    const text = String(value.value || "");
+    if (value.variant_type === "headline" && text.length > 30) errors.push(`Headline ${String(value.position || "")} exceeds 30 characters.`);
+    if (value.variant_type === "description" && text.length > 90) errors.push(`Description ${String(value.position || "")} exceeds 90 characters.`);
+    if (value.original_value !== undefined) {
+      const original = String(value.original_value);
+      if (Number(value.original_character_count) !== original.length || Number(value.corrected_character_count) !== text.length) errors.push("Revision character counts must match the supplied text.");
+      if (value.meaning_change_label !== "compliance-only") errors.push("Changed RSA lines require the compliance-only meaning-change label.");
+    }
+  }
   return errors;
 }

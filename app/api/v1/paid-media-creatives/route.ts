@@ -33,7 +33,7 @@ export async function POST(request: Request) {
   if (error || !data) return fail(400, "write_failed", error?.message || "Creative could not be created.");
   const variants = (Array.isArray(body.variants) ? body.variants : []).map((item, index) => {
     const value = item as Record<string, unknown>;
-    return { creative_id: data.id, creative_version: 1, variant_type: value.variant_type, position: Number(value.position || index + 1), value: value.value };
+    return { creative_id: data.id, creative_version: 1, variant_type: value.variant_type, position: Number(value.position || index + 1), value: value.value, original_value: value.original_value ?? null, original_character_count: value.original_character_count ?? null, corrected_character_count: value.corrected_character_count ?? null, meaning_change_label: value.meaning_change_label ?? null };
   });
   if (variants.length) {
     const { error: variantError } = await context.supabase.from("paid_media_creative_variants").insert(variants);

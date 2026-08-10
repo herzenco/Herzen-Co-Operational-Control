@@ -23,17 +23,17 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const errors = validateCreative({ ...current, ...payload, variants: variantInput.length ? variantInput : [{ variant_type: current.asset_type === "structured_snippet" ? "snippet_value" : "headline" }] });
     if (errors.length) return fail(422, "validation_failed", errors.join(" "), { errors });
     if (variantInput.length) {
-      const variants = variantInput.map((item, index) => { const value = item as Record<string, unknown>; return { creative_id: id, creative_version: Number(current.version) + 1, variant_type: value.variant_type, position: Number(value.position || index + 1), value: value.value }; });
+      const variants = variantInput.map((item, index) => { const value = item as Record<string, unknown>; return { creative_id: id, creative_version: Number(current.version) + 1, variant_type: value.variant_type, position: Number(value.position || index + 1), value: value.value, original_value: value.original_value ?? null, original_character_count: value.original_character_count ?? null, corrected_character_count: value.corrected_character_count ?? null, meaning_change_label: value.meaning_change_label ?? null }; });
       const { error: variantError } = await context.supabase.from("paid_media_creative_variants").insert(variants);
       if (variantError) return fail(409, "variant_write_failed", variantError.message);
     } else {
-      const { data: priorVariants, error: priorError } = await context.supabase.from("paid_media_creative_variants").select("variant_type,position,value").eq("creative_id", id).eq("creative_version", current.version);
+      const { data: priorVariants, error: priorError } = await context.supabase.from("paid_media_creative_variants").select("variant_type,position,value,original_value,original_character_count,corrected_character_count,meaning_change_label").eq("creative_id", id).eq("creative_version", current.version);
       if (priorError) return fail(409, "variant_read_failed", priorError.message);
       if (priorVariants?.length) await context.supabase.from("paid_media_creative_variants").insert(priorVariants.map((variant) => ({ ...variant, creative_id: id, creative_version: Number(current.version) + 1 })));
     }
   }
   if (!hasEdit) {
-    const { data: priorVariants, error: priorError } = await context.supabase.from("paid_media_creative_variants").select("variant_type,position,value").eq("creative_id", id).eq("creative_version", current.version);
+    const { data: priorVariants, error: priorError } = await context.supabase.from("paid_media_creative_variants").select("variant_type,position,value,original_value,original_character_count,corrected_character_count,meaning_change_label").eq("creative_id", id).eq("creative_version", current.version);
     if (priorError) return fail(409, "variant_read_failed", priorError.message);
     if (priorVariants?.length) await context.supabase.from("paid_media_creative_variants").insert(priorVariants.map((variant) => ({ ...variant, creative_id: id, creative_version: Number(current.version) + 1 })));
   }
