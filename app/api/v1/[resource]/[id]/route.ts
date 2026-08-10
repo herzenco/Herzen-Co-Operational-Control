@@ -8,6 +8,15 @@ import { normalizeContentWrite } from "../../../../../utils/content-write";
 
 type RouteContext = { params: Promise<{ resource: string; id: string }> };
 
+const machineWritableResources = new Set([
+  "tasks",
+  "content-items",
+  "content-assets",
+  "agent-work-items",
+  "agent-work-dependencies",
+  "content-feedback",
+]);
+
 export async function GET(request: Request, { params }: RouteContext) {
   const { resource: resourceName, id } = await params;
   const resource = getResource(resourceName);
@@ -32,7 +41,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: ["content-items", "content-assets", "agent-work-items", "agent-work-dependencies", "content-feedback"].includes(resourceName),
+    allowAgentWrite: machineWritableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const body = await readJson(request);
@@ -201,7 +210,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: ["content-items", "content-assets", "agent-work-items", "agent-work-dependencies", "content-feedback"].includes(resourceName),
+    allowAgentWrite: machineWritableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const { data, error } = await context.supabase
