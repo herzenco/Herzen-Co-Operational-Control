@@ -41,4 +41,7 @@ test("RSA and snippet validation require normalized variants", () => {
   assert.deepEqual(validateCreative({ ...base, variants: [{ variant_type: "headline", value: "Headline" }] }), []);
   assert.match(validateCreative({ ...base, variants: [] }).join(" "), /headline/);
   assert.match(validateCreative({ ...base, cta: "Buy now", variants: [{ variant_type: "headline", value: "Headline" }] }).join(" "), /Calendly/);
+  assert.match(validateCreative({ ...base, variants: [{ variant_type: "headline", position: 1, value: "This headline is definitely too long" }] }).join(" "), /30 characters/);
+  assert.deepEqual(validateCreative({ ...base, variants: [{ variant_type: "headline", position: 1, value: "Short corrected headline", original_value: "This original headline was much too long", original_character_count: 40, corrected_character_count: 24, meaning_change_label: "compliance-only" }] }), []);
+  assert.match(validateCreative({ ...base, variants: [{ variant_type: "headline", position: 1, value: "Short corrected headline", original_value: "This original headline was much too long", original_character_count: 39, corrected_character_count: 24, meaning_change_label: "compliance-only" }] }).join(" "), /counts/);
 });

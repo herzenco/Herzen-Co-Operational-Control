@@ -68,7 +68,14 @@ create table public.paid_media_creative_variants (
   variant_type text not null check (variant_type in ('headline','description','snippet_value')),
   position integer not null check (position > 0),
   value text not null check (nullif(btrim(value), '') is not null),
+  original_value text,
+  original_character_count integer,
+  corrected_character_count integer,
+  meaning_change_label text,
   created_at timestamptz not null default now(),
+  check (corrected_character_count is null or corrected_character_count = char_length(value)),
+  check (original_character_count is null or (original_value is not null and original_character_count = char_length(original_value))),
+  check ((original_value is null and original_character_count is null and meaning_change_label is null) or (original_value is not null and original_character_count is not null and corrected_character_count is not null and meaning_change_label in ('compliance-only'))),
   unique (creative_id, creative_version, variant_type, position)
 );
 
