@@ -70,6 +70,26 @@ function currentAsset(item: Row): GeneratedAsset {
     seo_title: item.seo_title || item.title, meta_description: item.meta_description || "", reasoning_summary: item.reasoning_summary || "" };
 }
 
+async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform: "website" | "linkedin") {
+  let sourceId = item.source_asset_id as string | undefined;
+  let deliveryId = item.delivery_asset_id as string | undefined;
+  if (!sourceId || !deliveryId) {
+    const snapshot = currentAsset(item);
+    const origin = process.env.OCC_PUBLIC_URL || "https://operations.herzenco.co";
+    const { data, error } = await supabase.from("content_assets").insert([
+      { content_item_id: item.id, asset_role: "source", external_url: `${origin}/api/v1/content-items/${item.id}`, file_name: `${snapshot.slug}.source.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, immutable: true } },
+      { content_item_id: item.id, asset_role: "delivery", external_url: `${origin}/api/v1/content-items/${item.id}`, file_name: `${snapshot.slug}.delivery.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, publishable: false, shadow: item.metadata?.shadow === true } },
+    ]).select("id,asset_role");
+    if (error || !data) throw error || new Error("Canonical review assets could not be persisted.");
+    sourceId = data.find((asset) => asset.asset_role === "source")?.id;
+    deliveryId = data.find((asset) => asset.asset_role === "delivery")?.id;
+  }
+  const manifest = { ...(item.package_manifest || {}), caption: item.caption || item.body, source_asset_id: sourceId, delivery_asset_id: deliveryId, publishing_enabled: false };
+  const { error } = await supabase.from("content_items").update({ source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest }).eq("id", item.id);
+  if (error) throw error;
+  Object.assign(item, { source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest });
+}
+
 export async function executeMonthlyContentItem(supabase: SupabaseClient, contentItemId: string, options: { shadow?: boolean } = {}) {
   const { data: item, error } = await supabase.from("content_items").select("*,content_channels(platform)").eq("id", contentItemId).single();
   if (error || !item) throw error || new Error("Content item was not found.");
@@ -130,6 +150,7 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
             await transition(supabase, item, "recovery_required", { actor: "Anthropic", reason: "QA iteration ceiling reached.", jobId: job.id, nextAction: "Lupe resolves the QA blocker.", ownerAgentId: identity.Lupe, retryCount: iteration });
           } else await transition(supabase, item, "revision_required", { actor: "Anthropic", reason: `QA gate failed (${result.seo_score}/${result.aeo_score}); revision required.`, jobId: job.id, nextAction: "OpenAI applies QA guidance.", retryCount: iteration, evidence: result.blockers });
         } else {
+          await ensureReviewPackage(supabase, item, platform);
           const humanUrl = `${process.env.OCC_PUBLIC_URL || "http://localhost:3000"}/?content_item=${item.id}`;
           await supabase.from("content_items").update({ human_review_url: humanUrl, review_url: humanUrl, review_ready_at: new Date().toISOString() }).eq("id", item.id);
           item.human_review_url = humanUrl;
