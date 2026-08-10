@@ -10,9 +10,7 @@ export type ContentRejection = {
 };
 
 const REVIEWABLE_CONTENT_STATUSES = new Set([
-  "ready_for_lupe",
   "ready_for_tito",
-  "revision_required",
 ]);
 
 function record(value: unknown): ContentReviewActivity | null {

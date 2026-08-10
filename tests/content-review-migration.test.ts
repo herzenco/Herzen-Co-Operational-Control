@@ -51,6 +51,8 @@ test("rejected feedback section reads immutable approval activity", () => {
   const history = rejectionHistoryFromActivity([{ id: 7, entity_type: "approvals", created_at: "2026-08-01T12:00:00Z", after_data: { id: "approval-1", content_item_id: "content-1", status: "changes_requested", decision_note: "Use less text on the visual.", decided_at: "2026-08-01T11:59:00Z" } }]);
   assert.deepEqual(history, [{ id: "7", approvalId: "approval-1", contentItemId: "content-1", decision: "changes_requested", reason: "Use less text on the visual.", decidedAt: "2026-08-01T11:59:00Z" }]);
   assert.equal(isContentReviewable("ready_for_tito"), true);
+  assert.equal(isContentReviewable("ready_for_lupe"), false);
+  assert.equal(isContentReviewable("revision_required"), false);
   assert.equal(isContentReviewable("drafting"), false);
 });
 
