@@ -1,4 +1,4 @@
-export type AutomationJobType = "monthly_generation" | "weekly_review_pack" | "publish_day_notice" | "weekly_k2_refresh" | "audit_retry";
+export type AutomationJobType = "monthly_generation" | "weekly_review_pack" | "publish_day_notice" | "weekly_k2_refresh" | "audit_retry" | "monthly_content_item" | "monthly_content_watchdog";
 
 export type AuditResult = {
   provider: "manus" | "anthropic";
@@ -45,4 +45,3 @@ export interface Auditor {
 }
 
 export type DeliveryItem = { title: string; review_url: string };
-

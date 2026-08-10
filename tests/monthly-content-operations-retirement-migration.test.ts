@@ -43,8 +43,8 @@ test("disabled automation result points to the replacement workflow", () => {
   assert.equal(result.activation_flag, MONTHLY_CONTENT_OPERATIONS_FLAG);
 });
 
-test("legacy cron, manual run, runner, and direct WhatsApp routes fail closed", () => {
-  assert.match(cronRoute, /disabledAutomationResult\("cron_route"\)/);
+test("legacy jobs fail closed while the replacement cron is executable", () => {
+  assert.match(cronRoute, /runDueSchedules/);
   assert.match(manualRoute, /disabledAutomationResult\("manual_route"/);
   assert.match(whatsappRoute, /disabledAutomationResult\("whatsapp_delivery"\)/);
   assert.match(runner, /LegacyContentAutomationDisabledError/);

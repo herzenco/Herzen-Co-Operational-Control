@@ -98,7 +98,7 @@ const EMPTY_CONTENT_FORM: ContentForm = {
   content_type_id: "",
   owner_agent_id: "",
   distribution_mode: "organic",
-  status: "idea",
+  status: "planned",
   publish_at: "",
   final_url: "",
   failure_message: "",
@@ -110,19 +110,26 @@ const EMPTY_DAILY_UPDATE_FORM: DailyUpdateForm = { agent_id: "", update_date: ""
 const EMPTY_LEAD_FORM: LeadForm = { property_id: "", assigned_agent_id: "", contact_name: "", company: "", email: "", phone: "", source: "website", subject: "", inquiry: "", status: "new", priority: "medium", next_follow_up_at: "", notes: "" };
 
 const CONTENT_STATUS_LABELS: Record<string, string> = {
-  idea: "Idea",
+  planned: "Planned",
+  research_pending: "Research pending",
   research_ready: "Research ready",
+  editorial_ready: "Editorial ready",
   drafting: "Drafting",
+  qa_in_progress: "QA in progress",
+  revision_required: "Revision required",
   ready_for_lupe: "Ready for Lupe",
-  awaiting_tito: "Awaiting Tito",
-  revision_requested: "Revision requested",
+  ready_for_tito: "Ready for Tito",
   approved: "Approved",
   scheduled: "Scheduled",
-  publishing: "Publishing",
   published: "Published",
+  performance_tracking: "Performance tracking",
+  completed: "Completed",
   blocked: "Blocked",
-  failed: "Failed",
+  recovery_required: "Recovery required",
+  rejected: "Rejected",
   cancelled: "Cancelled",
+  archived: "Archived",
+  superseded: "Superseded",
 };
 
 const VIEWS: Array<{ id: View; label: string }> = [
@@ -777,7 +784,7 @@ export function CommandCenter() {
       content_type_id: text(nextItem.content_type_id, ""),
       owner_agent_id: text(nextItem.owner_agent_id, ""),
       distribution_mode: text(nextItem.distribution_mode, "organic") as "organic" | "paid",
-      status: text(nextItem.status, "idea"),
+      status: text(nextItem.status, "planned"),
       publish_at: nextItem.publish_at ? new Date(String(nextItem.publish_at)).toISOString().slice(0, 16) : "",
       final_url: text(nextItem.final_url, ""),
       failure_message: text(nextItem.failure_message, ""),
@@ -816,7 +823,7 @@ export function CommandCenter() {
     });
     await request(`/api/v1/content-items/${item.id}`, {
       method: "PATCH",
-      body: JSON.stringify({ approval_id: approvalPayload.data.id, status: "awaiting_tito" }),
+      body: JSON.stringify({ approval_id: approvalPayload.data.id, status: "ready_for_tito" }),
     });
     return approvalPayload.data as RecordValue;
   }
@@ -837,7 +844,7 @@ export function CommandCenter() {
           status: decision,
           decision_note: decisionNote || null,
           decided_at: new Date().toISOString(),
-          schedule_content: decision === "approved" && Boolean(item.publish_at),
+          schedule_content: false,
         }),
       });
       setDrawer(null);
@@ -993,7 +1000,7 @@ export function CommandCenter() {
       await request(`/api/v1/content-items/${item.id}`, {
         method: "PATCH",
         body: JSON.stringify({
-          status: "awaiting_tito",
+          status: "ready_for_tito",
           approval_id: approvalPayload.data.id,
         }),
       });
@@ -1259,8 +1266,8 @@ export function CommandCenter() {
       const searchMatch = !query.trim() || JSON.stringify(item).toLowerCase().includes(query.trim().toLowerCase());
       return platformMatch && accountMatch && typeMatch && laneMatch && searchMatch;
     });
-    const scheduled = filteredContent.filter((item) => ["scheduled", "publishing"].includes(text(item.status)));
-    const inReview = filteredContent.filter((item) => ["ready_for_lupe", "awaiting_tito", "revision_requested"].includes(text(item.status)));
+    const scheduled = filteredContent.filter((item) => text(item.status) === "scheduled");
+    const inReview = filteredContent.filter((item) => ["ready_for_lupe", "ready_for_tito", "revision_required"].includes(text(item.status)));
     const published = filteredContent.filter((item) => text(item.status) === "published");
     const monthDate = calendarMonth ? new Date(`${calendarMonth}-01T12:00:00`) : new Date();
     const monthStart = new Date(monthDate.getFullYear(), monthDate.getMonth(), 1);
@@ -1380,18 +1387,14 @@ export function CommandCenter() {
               <button type="button" className="contentTitle contentTitleButton" onClick={() => previewContent(item)}><b>{text(item.title)}</b><small>{contentPropertyName(item)} · {contentTypeName(item)} · {text(item.distribution_mode)}</small><span className="mobileContentCaption">{text(item.caption, "No caption documented.")}</span>{Boolean(item.creative_asset_path) && <small className="creativePath">Post image · {String(item.creative_asset_path).split("/").at(-1)}</small>}</button>
               <span className="platformList">{contentPlatformForItem(item)}<small>{text(contentChannel(item)?.publishing_mode).replaceAll("_", " ")}</small></span>
               <span className="accountName">{contentAccountName(item)}</span>
-              <button className="ownerLink" onClick={() => { const agent = agents.find((entry) => String(entry.id) === String(item.owner_agent_id)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.owner_agent_id)) || "Unassigned"}</button>
+              <button className="ownerLink" onClick={() => { const ownerId = item.stage_owner_agent_id || item.owner_agent_id; const agent = agents.find((entry) => String(entry.id) === String(ownerId)); if (agent) openAgent(agent); }}>{agentMap.get(String(item.stage_owner_agent_id || item.owner_agent_id)) || (text(item.status) === "qa_in_progress" ? "Anthropic" : text(item.status) === "drafting" ? "OpenAI" : "Unassigned")}</button>
               <StatusPill status={text(item.status)}>{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</StatusPill>
               <span className="contentActions">
-                {["idea", "revision_requested"].includes(text(item.status)) && <button onClick={() => void advanceContent(item, "research_ready")}>Research ready</button>}
-                {text(item.status) === "research_ready" && <button onClick={() => void advanceContent(item, "drafting")}>Start draft</button>}
-                {text(item.status) === "drafting" && <button onClick={() => void advanceContent(item, "ready_for_lupe")}>Send to Lupe</button>}
+                {["planned", "research_pending", "research_ready", "editorial_ready", "drafting", "qa_in_progress", "revision_required"].includes(text(item.status)) && <small>{text(item.next_action, "Lifecycle executor owns this transition")}</small>}
                 {text(item.status) === "ready_for_lupe" && <button onClick={() => void sendContentToTito(item)}>Send to Tito</button>}
-                {text(item.status) === "approved" && <button onClick={() => openContent(item)}>{item.publish_at ? "Schedule" : "Set schedule"}</button>}
-                {text(item.status) === "scheduled" && contentPlatformForItem(item).toLowerCase() === "linkedin"
-                  ? <small>Lupe publishes on command</small>
-                  : text(item.status) === "scheduled" && <button onClick={() => void advanceContent(item, "publishing")}>Begin publishing</button>}
-                {["publishing", "failed"].includes(text(item.status)) && <button onClick={() => openContent(item)}>Record result</button>}
+                {text(item.status) === "approved" && <small>Approved · scheduling remains disabled</small>}
+                {text(item.status) === "scheduled" && <small>Scheduling is operator-controlled</small>}
+                {text(item.status) === "recovery_required" && <small>{text(item.blocker, "Lupe recovery required")}</small>}
                 {text(item.status) === "published" && Boolean(item.final_url) && <a href={String(item.final_url)} target="_blank" rel="noreferrer">Open ↗</a>}
               </span>
               {contentPlatformForItem(item).toLowerCase() === "instagram" && <div className="mobilePostTools">
@@ -1644,7 +1647,7 @@ export function CommandCenter() {
                 {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && isContentReviewable(selectedContent.status) && <section className="contentReviewDecision">
                   <span>Review decision</span>
                   <p>Approve this post for its documented date, or reject it and leave specific feedback for Lupe and {agentMap.get(String(selectedContent.owner_agent_id)) || "the content owner"}.</p>
-                  <div><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Reject</button><button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(selectedContent, "approved")}>{selectedContent.publish_at ? "Approve & schedule" : "Approve post"}</button></div>
+                  <div><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Reject</button><button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(selectedContent, "approved")}>Approve</button></div>
                   {!selectedContent.publish_at && <small>Add a publish date before approval to place this post directly on the calendar.</small>}
                 </section>}
                 <dl className="contentPreviewFacts">

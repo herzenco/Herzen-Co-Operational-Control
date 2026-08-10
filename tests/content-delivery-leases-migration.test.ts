@@ -34,9 +34,8 @@ test("direct delivery remains fail-closed after provider-confirmation retirement
   assert.match(whatsappRoute, /status: 410/);
 });
 
-test("scheduler is retired and historical run keys remain idempotent", () => {
-  assert.match(cronRoute, /disabledAutomationResult\("cron_route"\)/);
-  assert.doesNotMatch(cronRoute, /runDueSchedules/);
+test("replacement scheduler is executable while historical run keys remain idempotent", () => {
+  assert.match(cronRoute, /runDueSchedules/);
   assert.match(migration, /workflow_runs_run_key_uidx/);
   assert.match(runner, /skipped_duplicate/);
 });

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { disabledAutomationResult } from "../../../../utils/content-automation/retirement";
-import { authorizeCron } from "../../../../utils/content-automation/server";
+import { authorizeCron, createAutomationClient } from "../../../../utils/content-automation/server";
+import { runDueSchedules } from "../../../../utils/content-automation/runner";
 
 export async function GET(request: Request) {
   if (!authorizeCron(request)) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  return NextResponse.json({ error: disabledAutomationResult("cron_route") }, { status: 409 });
+  return NextResponse.json({ data: await runDueSchedules(createAutomationClient(), new Date(), crypto.randomUUID()) });
 }

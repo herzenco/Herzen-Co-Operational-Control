@@ -10,6 +10,7 @@ import { buildCanonicalPackage, readyQaChecklist } from "./packages";
 import { etDayStart, nextMonthStart } from "./schedule";
 import type { AutomationJobType, GeneratedAsset, PlannedTopic } from "./types";
 import { PublicationProviderError, publishContent } from "./publishing";
+import { executeMonthlyContentItem, runMonthlyContentWatchdog } from "../monthly-content/executor";
 
 type DbRecord = Record<string, unknown>;
 
@@ -290,7 +291,7 @@ export async function runPublishQueue(supabase: SupabaseClient, publishNow = new
       if (attemptId) await supabase.from("content_publish_attempts").update({ outcome: validationErrors.length ? "validation_failed" : "failed", response_status: providerFailure?.responseStatus || null, response_body: providerFailure?.responseBody || {}, error_message: message, completed_at: new Date().toISOString() }).eq("id", attemptId);
       await supabase.from("content_publish_jobs").update({ status: "failed", failure_message: message, validation_errors: validationErrors, provider_response: providerFailure?.responseBody || {}, retryable, next_attempt_at: nextAttemptAt }).eq("id", job.id);
       if (validationErrors.length || providerFailure?.retryable === false) {
-        await supabase.from("content_items").update({ status: "revision_requested", approval_state: "changes_requested", publication_state: "failed", failure_message: [message, ...validationErrors].filter(Boolean).join(" ") }).eq("id", item.id);
+        await supabase.from("content_items").update({ status: "revision_required", approval_state: "changes_requested", publication_state: "failed", failure_message: [message, ...validationErrors].filter(Boolean).join(" ") }).eq("id", item.id);
         if (item.approval_id) await supabase.from("approvals").update({ status: "changes_requested", decision_note: [message, ...validationErrors].filter(Boolean).join(" "), decided_at: new Date().toISOString() }).eq("id", item.approval_id);
         await supabase.from("content_review_events").insert({ content_item_id: item.id, event_type: "changes_requested", comment: [message, ...validationErrors].filter(Boolean).join(" "), reviewer_name: "Website publishing API" });
       } else {
@@ -326,7 +327,13 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
   try {
     await log(supabase, run.id, "run_started", `${jobType} started.`);
     let output: DbRecord;
-    if (jobType === "monthly_generation") output = await runMonthlyGeneration(supabase, run.id, now, options.configuration || {});
+    if (jobType === "monthly_content_item") {
+      const contentItemId = String(options.configuration?.content_item_id || "");
+      if (!contentItemId) throw new Error("monthly_content_item requires content_item_id.");
+      output = await executeMonthlyContentItem(supabase, contentItemId, { shadow: options.configuration?.shadow === true });
+    }
+    else if (jobType === "monthly_content_watchdog") output = await runMonthlyContentWatchdog(supabase, now);
+    else if (jobType === "monthly_generation") output = await runMonthlyGeneration(supabase, run.id, now, options.configuration || {});
     else if (jobType === "weekly_review_pack" || jobType === "publish_day_notice") output = await reviewDelivery(supabase, run.id, jobType, now, options.configuration || {});
     else if (jobType === "audit_retry") output = await runAuditRetry(supabase, run.id, options.configuration || {});
     else output = await runK2Refresh(supabase, options.configuration || {});
@@ -353,11 +360,13 @@ export async function runDueSchedules(supabase: SupabaseClient, now = new Date()
   }));
   const { data: schedules, error } = await supabase.from("automation_schedules").select("*").eq("enabled", true).lte("next_run_at", now.toISOString()).order("next_run_at");
   if (error) throw error;
-  const results = (schedules || []).map((schedule) => ({
-    status: "disabled",
-    schedule_id: schedule.id,
-    scheduled_for: schedule.next_run_at,
-    ...disabledAutomationResult("cron_route", String(schedule.job_type || "")),
-  }));
+  const results = [];
+  for (const schedule of schedules || []) {
+    if (isLegacyContentAutomationJobType(String(schedule.job_type))) {
+      results.push({ status: "disabled", schedule_id: schedule.id, scheduled_for: schedule.next_run_at, ...disabledAutomationResult("cron_route", String(schedule.job_type || "")) });
+      continue;
+    }
+    results.push(await executeAutomationJob(supabase, schedule.job_type as AutomationJobType, { now, scheduleId: schedule.id, scheduledFor: schedule.next_run_at, configuration: schedule.configuration || {}, requestId, triggerSource: "scheduler" }));
+  }
   return [{ status: "publication_queue", published }, ...retryResults, ...results];
 }

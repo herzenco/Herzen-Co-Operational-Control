@@ -39,7 +39,7 @@ export async function POST(request: Request) {
   if (action !== "commented") {
     const update = action === "approved"
       ? { status: "approved", approval_state: "approved", review_approved_at: new Date().toISOString(), review_approved_by: reviewerName || reviewerEmail || "Herzen reviewer" }
-      : { status: action === "declined" ? "cancelled" : "revision_requested", approval_state: action === "declined" ? "declined" : "changes_requested" };
+      : { status: action === "declined" ? "rejected" : "revision_required", approval_state: action === "declined" ? "declined" : "changes_requested" };
     const { error } = await supabase.from("content_items").update(update).eq("id", link.content_item_id);
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (currentItem?.approval_id) {

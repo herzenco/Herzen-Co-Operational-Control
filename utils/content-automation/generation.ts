@@ -1,4 +1,4 @@
-import type { GenerationPair, JsonModel, PlannedTopic } from "./types";
+import type { GeneratedAsset, GenerationPair, JsonModel, PlannedTopic } from "./types";
 
 const VOICE = "Founder-led, direct, sharp, useful, and energetic. No political stances. No giveaways or discounts unless the supplied context explicitly approves them.";
 
@@ -31,6 +31,26 @@ export async function generatePair(model: JsonModel, topic: PlannedTopic, contex
     JSON.stringify({ topic, context, website_url: `${process.env.HERZEN_WEBSITE_URL || "https://herzen.co"}/${topic.topic_key}`, rewrite_guidance: rewriteGuidance }),
   );
   return enforcePair(pair);
+}
+
+export async function generateIndependentAsset(model: JsonModel, input: {
+  platform: "website" | "linkedin";
+  title: string;
+  research: Record<string, unknown>;
+  editorialPackage: Record<string, unknown>;
+  priorAsset?: Record<string, unknown>;
+  rewriteGuidance?: string;
+}) {
+  const asset = await model.generate<GeneratedAsset>(
+    `Create one publication-ready ${input.platform} asset. ${VOICE} This is an independent operation; do not generate a companion asset. ${input.platform === "website" ? "Body length must be 400-1500 words." : "Write a complete LinkedIn post and include the approved Herzen website URL."} Return JSON with title, body, caption, slug, seo_title, meta_description, reasoning_summary.`,
+    JSON.stringify(input),
+  );
+  if (input.platform === "website") {
+    const count = blogWordCount(asset.body);
+    if (count < 400 || count > 1500) throw new Error(`Website body must contain 400-1500 words; received ${count}.`);
+  }
+  if (input.platform === "linkedin" && !/https?:\/\//i.test(asset.body)) throw new Error("LinkedIn content must contain an approved website URL.");
+  return asset;
 }
 
 export { blogWordCount, enforcePair };

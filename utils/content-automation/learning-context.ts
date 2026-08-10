@@ -1,7 +1,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 export async function loadLearningContext(supabase: SupabaseClient, propertyId: string) {
-  const { data: items, error: itemError } = await supabase.from("content_items").select("id,title,body,caption,status,audit_summary,audit_blockers,seo_score,aeo_score,approved_at").eq("property_id", propertyId).in("status", ["approved","published","revision_requested","failed"]).order("updated_at", { ascending: false }).limit(40);
+  const { data: items, error: itemError } = await supabase.from("content_items").select("id,title,body,caption,status,audit_summary,audit_blockers,seo_score,aeo_score,approved_at").eq("property_id", propertyId).in("status", ["approved","published","revision_required","recovery_required"]).order("updated_at", { ascending: false }).limit(40);
   if (itemError) throw itemError;
   const ids = (items || []).map((item) => item.id);
   const [{ data: reviews, error: reviewError }, { data: audits, error: auditError }] = ids.length ? await Promise.all([
@@ -12,4 +12,3 @@ export async function loadLearningContext(supabase: SupabaseClient, propertyId: 
   if (auditError) throw auditError;
   return { prior_assets: items || [], review_history: reviews || [], audit_history: audits || [] };
 }
-
