@@ -31,6 +31,7 @@ export function assertTransition(from: MonthlyContentStatus, to: MonthlyContentS
   if (MONTHLY_CONTENT_EXCEPTIONS.includes(to as never)) return;
   const expected = AUTOMATED_NEXT[from];
   const human = from === "ready_for_lupe" && to === "ready_for_tito"
+    || from === "qa_in_progress" && to === "revision_required"
     || from === "ready_for_tito" && ["approved", "revision_required", "rejected"].includes(to)
     || from === "approved" && to === "scheduled"
     || from === "scheduled" && to === "published"
