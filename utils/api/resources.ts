@@ -29,6 +29,9 @@ export type ResourceName =
   | "automation-schedules"
   | "workflow-runs"
   | "workflow-run-logs"
+  | "monthly-content-stage-jobs"
+  | "monthly-content-transitions"
+  | "monthly-content-revisions"
   | "content-delivery-jobs"
   | "content-publish-jobs"
   | "leads"
@@ -227,6 +230,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   "automation-schedules": { table: "automation_schedules", mutable: true, createFields: ["job_type", "timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], updateFields: ["timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], filters: ["job_type", "enabled"], defaultOrder: "next_run_at" },
   "workflow-runs": { table: "workflow_runs", mutable: false, createFields: [], updateFields: [], filters: ["schedule_id", "generation_run_id", "job_type", "status"], defaultOrder: "created_at" },
   "workflow-run-logs": { table: "workflow_run_logs", mutable: false, createFields: [], updateFields: [], filters: ["run_id", "level", "event"], defaultOrder: "created_at" },
+  "monthly-content-stage-jobs": { table: "monthly_content_stage_jobs", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "request_id", "stage", "owner_agent_id", "status"], defaultOrder: "created_at" },
+  "monthly-content-transitions": { table: "monthly_content_transition_events", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "request_id", "from_status", "to_status", "actor_type"], defaultOrder: "created_at" },
+  "monthly-content-revisions": { table: "monthly_content_revisions", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "job_id", "revision"], defaultOrder: "created_at" },
   "content-delivery-jobs": { table: "content_delivery_jobs", mutable: false, createFields: [], updateFields: [], filters: ["delivery_type", "status"], defaultOrder: "scheduled_for" },
   "content-publish-jobs": { table: "content_publish_jobs", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "platform", "status"], defaultOrder: "scheduled_for" },
   "content-status-history": {

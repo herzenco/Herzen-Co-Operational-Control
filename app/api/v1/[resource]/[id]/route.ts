@@ -136,7 +136,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const contentUpdate =
       body.status === "approved"
         ? {
-            status: body.schedule_content === true ? "scheduled" : "approved",
+            status: "approved",
             approval_state: "approved",
             approved_by: context.user!.id,
             approved_at: new Date().toISOString(),
@@ -149,7 +149,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
           }
         : body.status === "changes_requested"
           ? {
-              status: "revision_requested",
+              status: "revision_required",
               approval_state: "changes_requested",
               approved_by: null,
               approved_at: null,
