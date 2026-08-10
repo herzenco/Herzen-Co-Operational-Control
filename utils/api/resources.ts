@@ -42,6 +42,8 @@ type ResourceConfig = {
   updateFields: string[];
   filters: string[];
   defaultOrder: string;
+  defaultAscending?: boolean;
+  nullsFirst?: boolean;
 };
 
 export const resources: Record<ResourceName, ResourceConfig> = {
@@ -159,7 +161,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "distribution_mode", "status", "legacy_content_item_id", "source_system",
       "approval_state", "publication_state", "delivered_by_agent_id",
     ],
-    defaultOrder: "created_at",
+    defaultOrder: "publish_at",
+    defaultAscending: true,
+    nullsFirst: false,
   },
   "content-assets": {
     table: "content_assets", mutable: true,

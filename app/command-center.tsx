@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { Fragment, useEffect, useMemo, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
@@ -15,6 +15,7 @@ import {
 } from "./ui/command-center-primitives";
 import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
 import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
+import { approvalEligibility, approvalScheduledAt, compareByScheduledDate, scheduledDateLabel } from "../utils/content-calendar";
 
 type View = "command" | "kanban" | "list" | "worklogs" | "content" | "creative" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
@@ -646,7 +647,17 @@ export function CommandCenter() {
     });
   }, [lane, query, tasks]);
 
-  const pendingApprovals = approvals.filter((approval) => text(approval.status, "pending") === "pending");
+  const contentById = new Map(contentItems.map((item) => [String(item.id), item]));
+  const approvalQueue = approvals.map((approval) => ({ approval, eligibility: approvalEligibility(approval, contentById) }));
+  const pendingApprovals = approvalQueue
+    .filter(({ eligibility }) => eligibility === "actionable" || eligibility === "overdue")
+    .sort((left, right) => {
+      if (left.eligibility !== right.eligibility) return left.eligibility === "overdue" ? -1 : 1;
+      return new Date(String(approvalScheduledAt(left.approval, contentById) || 0)).getTime() - new Date(String(approvalScheduledAt(right.approval, contentById) || 0)).getTime();
+    })
+    .map(({ approval }) => approval);
+  const futureApprovals = approvalQueue.filter(({ eligibility }) => eligibility === "future").map(({ approval }) => approval);
+  const inactivePendingApprovals = approvalQueue.filter(({ approval, eligibility }) => eligibility === "inactive" && text(approval.status, "pending") === "pending").map(({ approval }) => approval);
   const dueToday = tasks.filter((task) => {
     if (!task.due_at || taskStatus(task) === "done") return false;
     return new Date(String(task.due_at)).toDateString() === new Date().toDateString();
@@ -1031,7 +1042,10 @@ export function CommandCenter() {
   function reviewItemMeta(item: CommandReviewItem) {
     if (item.kind === "task") return `${taskAssigneeName(item.record)} · ${statusLabel(taskStatus(item.record))} · ${dateLabel(item.record.due_at)}`;
     if (item.kind === "content") return `${contentAccountName(item.record)} · ${contentPlatformForItem(item.record)} · ${dateLabel(item.record.publish_at)}`;
-    if (item.kind === "approval") return `${statusLabel(text(item.record.status, "pending"))} · ${dateLabel(item.record.due_at)}`;
+    if (item.kind === "approval") {
+      const eligibility = approvalEligibility(item.record, contentById);
+      return `${eligibility === "overdue" ? "Overdue" : "Due"} · ${scheduledDateLabel(approvalScheduledAt(item.record, contentById), false)}`;
+    }
     const update = latestUpdate.get(String(item.record.id));
     return `${text(item.record.role, "Agent")} · ${update ? `reported ${dateLabel(update.update_date)}` : "report missing"}`;
   }
@@ -1042,7 +1056,7 @@ export function CommandCenter() {
         <MetricDeck items={[
           { label: "Open instructions", value: String(activeTasks.length).padStart(2, "0"), note: <>Across {agents.length} operating lanes</> },
           { label: "Due today", value: String(dueToday.length).padStart(2, "0"), note: "Requires attention before close" },
-          { label: "Approval queue", value: String(pendingApprovals.length).padStart(2, "0"), note: "Decision packages awaiting you" },
+          { label: "Approval queue", value: String(pendingApprovals.length).padStart(2, "0"), note: "Overdue or publishing within 7 days" },
           { label: "Daily reports", value: <>{reporting}/{agents.length}</>, note: <>{agents.length - reporting} lanes still silent</> },
         ]} />
 
@@ -1050,7 +1064,7 @@ export function CommandCenter() {
           <PanelHeader eyebrow="Daily brief" title={todayLabel} meta="Live operational readout" />
           <div className="briefSnapshot">
             <button onClick={() => openCommandReview("Today’s focus", `${dueToday.length} instructions and ${contentDueToday.length} publications are due today.`, [...contentDueToday.map((record) => ({ kind: "content" as const, record })), ...dueToday.map((record) => ({ kind: "task" as const, record }))])}><span>Today’s focus</span><p>{dueToday.length || contentDueToday.length ? `${dueToday.length} instructions and ${contentDueToday.length} publications are due today. ${[...contentDueToday, ...dueToday].slice(0, 3).map((item) => text(item.title)).join(" · ")}` : "No instructions or publications are due today; use the window to clear review-stage work."}</p><small>Review items →</small></button>
-            <button className={pendingApprovals.length ? "attention" : ""} onClick={() => openCommandReview("Your attention", `${pendingApprovals.length} approval packages await a decision.`, pendingApprovals.map((record) => ({ kind: "approval", record })))}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision.` : "No approval decisions are waiting."}</p><small>Review items →</small></button>
+            <button className={pendingApprovals.length ? "attention" : ""} onClick={() => openCommandReview("Your attention", `${pendingApprovals.length} approval packages are overdue or publish within seven days.`, pendingApprovals.map((record) => ({ kind: "approval", record })))}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision within the operating window.` : "No approval decisions are due within seven days."}</p><small>Review items →</small></button>
             <button className={blockedTasks.length || overdueTasks.length ? "attention" : ""} onClick={() => { const records = [...new Map([...blockedTasks, ...overdueTasks].map((record) => [String(record.id), record])).values()]; openCommandReview("Watch list", `${blockedTasks.length} blocked and ${overdueTasks.length} overdue instructions require attention.`, records.map((record) => ({ kind: "task", record }))); }}><span>Watch list</span><p>{blockedTasks.length || overdueTasks.length ? `${blockedTasks.length} blocked · ${overdueTasks.length} overdue. Lupe should resolve these before new work begins.` : "Nothing is blocked or overdue."}</p><small>Review items →</small></button>
             <button className={reporting < agents.length ? "attention" : ""} onClick={() => openCommandReview("Reporting", `${reporting} of ${agents.length} lanes have reported.`, agents.map((record) => ({ kind: "agent", record })))}><span>Reporting</span><p>{reporting} of {agents.length} lanes have reported. {agents.length - reporting ? `${agents.length - reporting} updates are still missing.` : "The full roster is accounted for."}</p><small>Review lanes →</small></button>
           </div>
@@ -1251,7 +1265,7 @@ export function CommandCenter() {
     const platforms = [...new Set(contentChannels.map((channel) => text(channel.platform)).filter(Boolean))].sort();
     const accounts = [...new Set(contentChannels.map((channel) => text(channel.account_name)).filter(Boolean))].sort();
     const types = [...new Set(contentTypes.map((contentTypeRecord) => text(contentTypeRecord.name)).filter(Boolean))].sort();
-    const filteredContent = contentItems.filter((item) => {
+    const matchingContent = contentItems.filter((item) => {
       const platformMatch = contentPlatform === "all" || contentPlatform === contentPlatformForItem(item);
       const accountMatch = contentAccount === "all" || contentAccount === contentAccountName(item);
       const typeMatch = contentType === "all" || contentType === contentTypeName(item);
@@ -1259,6 +1273,10 @@ export function CommandCenter() {
       const searchMatch = !query.trim() || JSON.stringify(item).toLowerCase().includes(query.trim().toLowerCase());
       return platformMatch && accountMatch && typeMatch && laneMatch && searchMatch;
     });
+    const activeScheduledContent = matchingContent.filter((item) => text(item.status) !== "cancelled" && Boolean(item.publish_at)).sort(compareByScheduledDate);
+    const unscheduledContent = matchingContent.filter((item) => text(item.status) !== "cancelled" && !item.publish_at).sort(compareByScheduledDate);
+    const cancelledContent = matchingContent.filter((item) => text(item.status) === "cancelled").sort(compareByScheduledDate);
+    const filteredContent = [...activeScheduledContent, ...unscheduledContent, ...cancelledContent];
     const scheduled = filteredContent.filter((item) => ["scheduled", "publishing"].includes(text(item.status)));
     const inReview = filteredContent.filter((item) => ["ready_for_lupe", "awaiting_tito", "revision_requested"].includes(text(item.status)));
     const published = filteredContent.filter((item) => text(item.status) === "published");
@@ -1276,8 +1294,10 @@ export function CommandCenter() {
     const propertyPlatforms = [...new Set(propertyChannels.map((channel) => text(channel.platform)).filter(Boolean))];
     const activePropertyPlatform = propertyPlatforms.includes(selectedPropertyPlatform) ? selectedPropertyPlatform : (propertyPlatforms[0] || "");
     const previewItems = contentItems.filter((item) =>
-      String(item.property_id) === String(selectedProperty?.id) && contentPlatformForItem(item) === activePropertyPlatform
-    ).sort((left, right) => new Date(String(right.publish_at || right.created_at)).getTime() - new Date(String(left.publish_at || left.created_at)).getTime());
+      String(item.property_id) === String(selectedProperty?.id)
+        && contentPlatformForItem(item) === activePropertyPlatform
+        && text(item.status) !== "cancelled"
+    ).sort(compareByScheduledDate);
     const rejectedFeedback = rejectionHistoryFromActivity(approvalActivity);
     for (const approval of approvals) {
       const decision = text(approval.status, "");
@@ -1344,7 +1364,7 @@ export function CommandCenter() {
           <div className="publishingCalendarGrid">
             {calendarDays.map((day) => {
               const dayKey = day.toLocaleDateString("en-CA");
-              const dayItems = filteredContent.filter((item) => item.publish_at && new Date(String(item.publish_at)).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === dayKey);
+              const dayItems = activeScheduledContent.filter((item) => new Date(String(item.publish_at)).toLocaleDateString("en-CA", { timeZone: "America/New_York" }) === dayKey);
               return <div key={dayKey} className={`publishingDay ${day.getMonth() !== monthDate.getMonth() ? "outside" : ""}`}>
                 <time>{day.getDate()}</time>
                 {dayItems.map((item) => {
@@ -1368,9 +1388,12 @@ export function CommandCenter() {
             {(contentPlatform !== "all" || contentAccount !== "all" || contentType !== "all") && <button className="ghostBtn" onClick={() => { setContentPlatform("all"); setContentAccount("all"); setContentType("all"); }}>Clear filters</button>}
           </div>
           <div className="contentHead"><span>Date</span><span>Content</span><span>Platform</span><span>Account</span><span>Owner</span><span>Stage</span><span /></div>
-          <div className="contentCards" aria-label="Content review queue">{filteredContent.map((item) => (
-            <article key={String(item.id)} className={`${contentPlatformForItem(item).toLowerCase() === "instagram" ? "instagramReviewCard" : ""} ${isContentReviewable(item.status) ? "reviewable" : ""}`.trim()}>
-              <time>{item.publish_at ? <><b>{dateLabel(item.publish_at)}</b><small>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</small></> : <><b>Unscheduled</b><small>Awaiting approval</small></>}</time>
+          <div className="contentCards" aria-label="Content review queue">{filteredContent.map((item, index) => (
+            <Fragment key={String(item.id)}>
+              {index === activeScheduledContent.length && unscheduledContent.length > 0 && <div className="contentSectionLabel"><b>Unscheduled</b><span>No publication date assigned</span></div>}
+              {index === activeScheduledContent.length + unscheduledContent.length && cancelledContent.length > 0 && <div className="contentSectionLabel cancelled"><b>Cancelled history</b><span>Preserved for auditability</span></div>}
+            <article className={`${contentPlatformForItem(item).toLowerCase() === "instagram" ? "instagramReviewCard" : ""} ${isContentReviewable(item.status) ? "reviewable" : ""} ${text(item.status) === "cancelled" ? "cancelledContentCard" : ""}`.trim()}>
+              <time>{item.publish_at ? <b>{scheduledDateLabel(item.publish_at)}</b> : <><b>Unscheduled</b><small>No publication date</small></>}</time>
               <button type="button" className="mobilePostCreative" onClick={() => previewContent(item)} aria-label={`Open ${text(item.title)} preview`}>
                 {contentPictureUrl(item) ? <>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -1404,6 +1427,7 @@ export function CommandCenter() {
                 <button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(item, "approved")}>Approve</button>
               </div>}
             </article>
+            </Fragment>
           ))}
           {!filteredContent.length && <div className="opsEmpty">{contentItems.length ? "No content matches the selected filters." : "No content records yet. Create the first item and move it through research, production, Tito approval, and publishing."}</div>}
           </div>
@@ -1450,21 +1474,26 @@ export function CommandCenter() {
   function renderApprovals() {
     return (
       <div className="approvalDeck">
-        {approvals.map((approval) => {
-          const decided = text(approval.status, "pending") !== "pending";
+        <section className="deckPanel approvalWindowSummary">
+          <PanelHeader eyebrow="Next 7 days" title={`${pendingApprovals.length} actionable approval${pendingApprovals.length === 1 ? "" : "s"}`} meta={`${futureApprovals.length} scheduled for later`} />
+          <p>Overdue packages remain first. Future packages enter this queue automatically when their scheduled publication date is within seven calendar days.</p>
+        </section>
+        {pendingApprovals.map((approval) => {
+          const overdue = approvalEligibility(approval, contentById) === "overdue";
           return (
-            <article className={`deckPanel approvalCard ${decided ? "decided" : ""}`} key={String(approval.id)}>
-              <header><div><span>{text(approval.status, "pending")}</span><h2>{text(approval.title, "Untitled decision")}</h2></div><b>{dateLabel(approval.due_at)}</b></header>
+            <article className={`deckPanel approvalCard ${overdue ? "overdue" : ""}`} key={String(approval.id)}>
+              <header><div><span>{overdue ? "Overdue" : "Due within 7 days"}</span><h2>{text(approval.title, "Untitled decision")}</h2></div><b>{scheduledDateLabel(approvalScheduledAt(approval, contentById), false)}</b></header>
               <div className="approvalBody">
                 <div><span>Summary</span><p>{text(approval.summary, "No summary documented.")}</p></div>
                 <div><span>Recommendation</span><p>{text(approval.recommendation, "No recommendation documented.")}</p></div>
                 <div><span>Risk</span><p>{text(approval.risk, "No risk documented.")}</p></div>
               </div>
-              {!decided && <footer><button className="liveBtn" onClick={() => void decide(approval, "approved")}>Approve</button><button className="outlineBtn" onClick={() => void decide(approval, "changes_requested")}>Request changes</button><button className="ghostBtn" onClick={() => void decide(approval, "declined")}>Decline</button></footer>}
+              <footer><button className="liveBtn" onClick={() => void decide(approval, "approved")}>Approve</button><button className="outlineBtn" onClick={() => void decide(approval, "changes_requested")}>Request changes</button><button className="ghostBtn" onClick={() => void decide(approval, "declined")}>Decline</button></footer>
             </article>
           );
         })}
-        {!approvals.length && <section className="deckPanel opsEmpty">No approval packages have been submitted.</section>}
+        {!pendingApprovals.length && <section className="deckPanel opsEmpty">No approval packages are due within the next seven days.</section>}
+        {inactivePendingApprovals.length > 0 && <section className="deckPanel approvalArchiveNote"><b>{inactivePendingApprovals.length} inactive package{inactivePendingApprovals.length === 1 ? "" : "s"} retained</b><span>Linked cancelled or unscheduled content is excluded from the actionable queue without deleting its approval history.</span></section>}
       </div>
     );
   }
@@ -1798,7 +1827,7 @@ export function CommandCenter() {
               <div><LiveLabel>Daily brief</LiveLabel><h2>Operational state at a glance.</h2><p>Generated from the live instruction ledger, approval queue, and most recent agent reports.</p>
                 <div className="briefLine"><span>Open</span><p>{activeTasks.length} instructions remain open across {agents.length} agent lanes.</p></div>
                 <div className="briefLine"><span>Due today</span><p>{dueToday.length || contentDueToday.length ? [...contentDueToday, ...dueToday].map((item) => text(item.title)).join(" · ") : "Nothing is due before close."}</p></div>
-                <div className="briefLine"><span>Decisions</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval packages await direction.` : "The approval queue is clear."}</p></div>
+                <div className="briefLine"><span>Decisions</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval packages are overdue or due within seven days.` : "The seven-day approval queue is clear."}</p></div>
                 <div className="briefLine"><span>Reporting</span><p>{reporting} of {agents.length} agents have a documented update.</p></div>
                 <div className="briefRecommendation"><span>Lupe recommendation</span><p>{pendingApprovals.length ? "Clear the approval queue first, then close the oldest review-stage instructions." : "Focus the team on today’s due work and close review-stage instructions."}</p></div>
               </div>
