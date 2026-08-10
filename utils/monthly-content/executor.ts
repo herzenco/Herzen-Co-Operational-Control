@@ -90,6 +90,17 @@ async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform
   Object.assign(item, { source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest });
 }
 
+async function ensureLupeWorkItem(supabase: SupabaseClient, item: Row, lupeId: string) {
+  const reviewUrl = String(item.human_review_url || item.review_url || `${process.env.OCC_PUBLIC_URL || "https://operations.herzenco.co"}/?content_item=${item.id}`);
+  const payload = { agent_id: lupeId, work_item_type: "review", title: `Monthly content acceptance: ${item.title}`, summary: "QA passed; verify package and route to Tito.", status: "ready", content_item_id: item.id, lane: "monthly_content_lupe", attachments: [{ label: "OCC review", url: reviewUrl }] };
+  const { data: existing, error: readError } = await supabase.from("agent_work_items").select("id").eq("content_item_id", item.id).eq("lane", "monthly_content_lupe").maybeSingle();
+  if (readError) throw readError;
+  const write = existing
+    ? await supabase.from("agent_work_items").update(payload).eq("id", existing.id)
+    : await supabase.from("agent_work_items").insert(payload);
+  if (write.error) throw write.error;
+}
+
 export async function executeMonthlyContentItem(supabase: SupabaseClient, contentItemId: string, options: { shadow?: boolean } = {}) {
   const { data: item, error } = await supabase.from("content_items").select("*,content_channels(platform)").eq("id", contentItemId).single();
   if (error || !item) throw error || new Error("Content item was not found.");
@@ -97,6 +108,10 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
   const platform = String((item.content_channels as Row)?.platform) as "website" | "linkedin";
   const writer = new OpenAIJsonModel();
   const auditor = new AnthropicAuditor(new AnthropicJsonModel());
+  if (item.status === "ready_for_lupe") {
+    await ensureLupeWorkItem(supabase, item, identity.Lupe);
+    return { content_item_id: item.id, status: item.status, review_url: item.human_review_url || item.review_url || null, steps: 0 };
+  }
   let steps = 0;
   // A serverless invocation owns exactly one durable stage. Provider latency
   // cannot strand later stages inside a single request timeout.
@@ -155,7 +170,7 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
           await supabase.from("content_items").update({ human_review_url: humanUrl, review_url: humanUrl, review_ready_at: new Date().toISOString() }).eq("id", item.id);
           item.human_review_url = humanUrl;
           await transition(supabase, item, "ready_for_lupe", { actor: "Anthropic", reason: `Independent QA passed (${result.seo_score}/${result.aeo_score}).`, jobId: job.id, ownerAgentId: identity.Lupe, nextAction: "Lupe performs acceptance review.", evidence: [{ seo_score: result.seo_score, aeo_score: result.aeo_score, review_url: humanUrl }] });
-          await supabase.from("agent_work_items").upsert({ agent_id: identity.Lupe, work_item_type: "review", title: `Monthly content acceptance: ${item.title}`, summary: "QA passed; verify package and route to Tito.", status: "ready", content_item_id: item.id, lane: "monthly_content_lupe", attachments: [{ label: "OCC review", url: humanUrl }] }, { onConflict: "content_item_id,lane" });
+          await ensureLupeWorkItem(supabase, item, identity.Lupe);
         }
       }
     } catch (failure) {

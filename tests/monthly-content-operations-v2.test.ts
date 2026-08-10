@@ -42,6 +42,7 @@ test("executor separates platform generation and uses independent Anthropic QA",
   assert.match(executor, /aeo_score: result\.aeo_score/);
   assert.match(executor, /monthly_content_revisions/);
   assert.match(executor, /monthly_content_lupe/);
+  assert.match(executor, /ensureLupeWorkItem/);
   assert.match(executor, /ensureReviewPackage/);
   assert.match(executor, /while \(steps\+\+ < 1\)/);
 });
