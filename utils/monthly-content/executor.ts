@@ -78,7 +78,9 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
   const writer = new OpenAIJsonModel();
   const auditor = new AnthropicAuditor(new AnthropicJsonModel());
   let steps = 0;
-  while (steps++ < 12) {
+  // A serverless invocation owns exactly one durable stage. Provider latency
+  // cannot strand later stages inside a single request timeout.
+  while (steps++ < 1) {
     const stage = item.status as MonthlyContentStatus;
     if (["ready_for_lupe","ready_for_tito","approved","scheduled","published","performance_tracking","completed","blocked","recovery_required","rejected","cancelled","archived","superseded"].includes(stage)) break;
     const ownerName = OWNER_BY_STAGE[stage];
