@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
@@ -15,6 +15,7 @@ import {
 } from "./ui/command-center-primitives";
 import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
 import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
+import { TaskDetailDialog } from "./task-detail-dialog";
 
 type View = "command" | "kanban" | "list" | "worklogs" | "content" | "creative" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
@@ -207,7 +208,7 @@ function triggerFileDownload(url: string, filename: string, openInNewTab = false
   link.remove();
 }
 
-export function CommandCenter() {
+export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }) {
   const supabase = useMemo(() => createClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -224,7 +225,9 @@ export function CommandCenter() {
   const [workDependencies, setWorkDependencies] = useState<RecordValue[]>([]);
   const [contentFeedback, setContentFeedback] = useState<RecordValue[]>([]);
   const [socialQueue, setSocialQueue] = useState<RecordValue[]>([]);
-  const [view, setView] = useState<View>("command");
+  const [view, setView] = useState<View>(initialTaskId ? "kanban" : "command");
+  const [selectedTaskId, setSelectedTaskId] = useState(initialTaskId);
+  const taskOpenedFromBoard = useRef(false);
   const [lane, setLane] = useState("all");
   const [query, setQuery] = useState("");
   const [contentPlatform, setContentPlatform] = useState("all");
@@ -288,6 +291,16 @@ export function CommandCenter() {
       subscription.unsubscribe();
     };
   }, [supabase]);
+
+  useEffect(() => {
+    function syncTaskFromHistory() {
+      const match = window.location.pathname.match(/^\/tasks\/([^/]+)\/?$/);
+      setSelectedTaskId(match ? decodeURIComponent(match[1]) : "");
+      if (match) setView("kanban");
+    }
+    window.addEventListener("popstate", syncTaskFromHistory);
+    return () => window.removeEventListener("popstate", syncTaskFromHistory);
+  }, []);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -1031,9 +1044,20 @@ export function CommandCenter() {
   }
 
   function openTaskReview(task: RecordValue) {
-    const item = { kind: "task" as const, record: task };
-    setCommandReview({ title: "Instruction detail", summary: "Review the complete instruction record.", items: [item] });
-    setSelectedReviewItem(item);
+    const id = String(task.id);
+    taskOpenedFromBoard.current = true;
+    window.history.pushState({ occTaskId: id }, "", `/tasks/${encodeURIComponent(id)}`);
+    setSelectedTaskId(id);
+  }
+
+  function closeTaskDetail() {
+    setSelectedTaskId("");
+    if (taskOpenedFromBoard.current && window.history.state?.occTaskId) {
+      taskOpenedFromBoard.current = false;
+      window.history.back();
+      return;
+    }
+    window.history.replaceState({}, "", "/");
   }
 
   function closeCommandReview() {
@@ -1176,12 +1200,12 @@ export function CommandCenter() {
               <p>{column.note}</p>
               <div>
                 {items.map((task) => (
-                  <article key={String(task.id)}>
+                  <article key={String(task.id)} className="kanbanTicket" role="button" tabIndex={0} aria-label={`Open ticket ${text(task.title)}`} onClick={() => openTaskReview(task)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTaskReview(task); } }}>
                     <header><span>{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
                     <h3>{text(task.title)}</h3>
                     <p>{text(task.description, "No context documented.")}</p>
                     <footer><span><AgentMark>{initials(taskAssigneeName(task))}</AgentMark>{taskAssigneeName(task)}</span>
-                      {column.id !== "done" && <button onClick={() => void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done")}>Advance →</button>}
+                      {column.id !== "done" && <button onClick={(event) => { event.stopPropagation(); void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done"); }}>Advance →</button>}
                     </footer>
                   </article>
                 ))}
@@ -1609,6 +1633,8 @@ export function CommandCenter() {
           </section>
         </div>
       )}
+
+      {selectedTaskId && session?.access_token && <TaskDetailDialog key={selectedTaskId} taskId={selectedTaskId} accessToken={session.access_token} agents={agents} profiles={profiles} projects={projects} onClose={closeTaskDetail} />}
 
       {drawer && (
         <div className="drawerShade" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawer(null); }}>
