@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import type { Session } from "@supabase/supabase-js";
 import { createClient } from "../utils/supabase/client";
 import { WorkflowDesigner } from "./workflows/workflow-designer";
@@ -17,7 +18,7 @@ import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeEx
 import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
 import { TaskDetailDialog } from "./task-detail-dialog";
 
-type View = "command" | "kanban" | "list" | "worklogs" | "content" | "creative" | "agentops" | "leads" | "approvals" | "workflows";
+export type View = "command" | "kanban" | "list" | "worklogs" | "content" | "creative" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
 
 type Viewer = {
@@ -48,6 +49,7 @@ type TaskForm = {
   priority: string;
   due_at: string;
   definition_of_done: string;
+  tags: string;
   status: string;
 };
 
@@ -76,6 +78,7 @@ type ContentUtilityStatus = { contentId: string; message: string; kind: "success
 type CommandReviewKind = "task" | "content" | "approval" | "agent";
 type CommandReviewItem = { kind: CommandReviewKind; record: RecordValue };
 type CommandReview = { title: string; summary: string; items: CommandReviewItem[] };
+type ListSortKey = "instruction" | "owner" | "priority" | "status" | "due" | "project";
 
 const EMPTY_FORM: TaskForm = {
   title: "",
@@ -85,6 +88,7 @@ const EMPTY_FORM: TaskForm = {
   priority: "medium",
   due_at: "",
   definition_of_done: "",
+  tags: "",
   status: "inbox",
 };
 
@@ -208,7 +212,16 @@ function triggerFileDownload(url: string, filename: string, openInNewTab = false
   link.remove();
 }
 
-export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }) {
+const VIEW_PATHS: Record<View, string> = { command: "/command", kanban: "/kanban", list: "/list", worklogs: "/work-logs", content: "/content", creative: "/creative-intake", agentops: "/agent-ops", leads: "/leads", approvals: "/approvals", workflows: "/workflows" };
+
+function viewFromPathname(pathname: string): View {
+  if (pathname.startsWith("/kanban")) return "kanban";
+  return (Object.entries(VIEW_PATHS).find(([, path]) => pathname === path)?.[0] as View | undefined) || "command";
+}
+
+export function CommandCenter() {
+  const router = useRouter();
+  const pathname = usePathname();
   const supabase = useMemo(() => createClient(), []);
   const [session, setSession] = useState<Session | null>(null);
   const [overview, setOverview] = useState<Overview | null>(null);
@@ -225,10 +238,17 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   const [workDependencies, setWorkDependencies] = useState<RecordValue[]>([]);
   const [contentFeedback, setContentFeedback] = useState<RecordValue[]>([]);
   const [socialQueue, setSocialQueue] = useState<RecordValue[]>([]);
-  const [view, setView] = useState<View>(initialTaskId ? "kanban" : "command");
-  const [selectedTaskId, setSelectedTaskId] = useState(initialTaskId);
-  const taskOpenedFromBoard = useRef(false);
+  const view = viewFromPathname(pathname);
+  const taskMatch = pathname.match(/^\/kanban\/([^/]+)\/?$/);
+  const selectedTaskId = taskMatch ? decodeURIComponent(taskMatch[1]) : "";
   const [lane, setLane] = useState("all");
+  const [boardProject, setBoardProject] = useState("all");
+  const [boardTag, setBoardTag] = useState("all");
+  const [dragTaskId, setDragTaskId] = useState("");
+  const [dropStatus, setDropStatus] = useState("");
+  const [listSort, setListSort] = useState<{ key: ListSortKey; direction: "asc" | "desc" }>({ key: "instruction", direction: "asc" });
+  const [dueTask, setDueTask] = useState<RecordValue | null>(null);
+  const [dueDateDraft, setDueDateDraft] = useState("");
   const [query, setQuery] = useState("");
   const [contentPlatform, setContentPlatform] = useState("all");
   const [contentAccount, setContentAccount] = useState("all");
@@ -240,7 +260,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   const [opsSignal, setOpsSignal] = useState("all");
   const [opsPublishDate, setOpsPublishDate] = useState("");
   const [todayLabel, setTodayLabel] = useState("Today");
-  const [drawer, setDrawer] = useState<"task" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
+  const [drawer, setDrawer] = useState<"task" | "dueDate" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
   const [commandReview, setCommandReview] = useState<CommandReview | null>(null);
   const [selectedReviewItem, setSelectedReviewItem] = useState<CommandReviewItem | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
@@ -258,7 +278,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   const [creativeFile, setCreativeFile] = useState<File | null>(null);
   const [contentMediaUrls, setContentMediaUrls] = useState<Record<string, string>>({});
   const [contentDownloadUrls, setContentDownloadUrls] = useState<Record<string, string>>({});
-  const [contentMediaErrors, setContentMediaErrors] = useState<Record<string, string>>({});
+  const [, setContentMediaErrors] = useState<Record<string, string>>({});
   const [contentUtilityStatus, setContentUtilityStatus] = useState<ContentUtilityStatus | null>(null);
   const [downloadingContentId, setDownloadingContentId] = useState("");
   const [rejectingContent, setRejectingContent] = useState<RecordValue | null>(null);
@@ -267,6 +287,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   const [calendarMonth, setCalendarMonth] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("");
   const [selectedPropertyPlatform, setSelectedPropertyPlatform] = useState("");
+  const [feedPreviewOpen, setFeedPreviewOpen] = useState(false);
   const [error, setError] = useState("");
   const [busy, startTransition] = useTransition();
 
@@ -292,15 +313,9 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
     };
   }, [supabase]);
 
-  useEffect(() => {
-    function syncTaskFromHistory() {
-      const match = window.location.pathname.match(/^\/tasks\/([^/]+)\/?$/);
-      setSelectedTaskId(match ? decodeURIComponent(match[1]) : "");
-      if (match) setView("kanban");
-    }
-    window.addEventListener("popstate", syncTaskFromHistory);
-    return () => window.removeEventListener("popstate", syncTaskFromHistory);
-  }, []);
+  function navigateToView(nextView: View) {
+    router.push(VIEW_PATHS[nextView]);
+  }
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -350,10 +365,13 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
     if (!contentItemId || !contentItems.length) return;
     const linkedItem = contentItems.find((item) => String(item.id) === contentItemId);
     if (!linkedItem) return;
-    setView("content");
-    setSelectedContent(linkedItem);
-    setDrawer("contentPreview");
-  }, [contentItems]);
+    const timer = window.setTimeout(() => {
+      if (pathname !== "/content") router.replace(`/content?content_item=${encodeURIComponent(contentItemId)}`);
+      setSelectedContent(linkedItem);
+      setDrawer("contentPreview");
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [contentItems, pathname, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -509,6 +527,10 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
       setError("Give the instruction a title before assigning it.");
       return;
     }
+    if (!form.due_at) {
+      setError("Every instruction needs a due date before Lupe can issue it.");
+      return;
+    }
     try {
       setError("");
       const payload: RecordValue = {
@@ -521,6 +543,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
       if (form.assignee.startsWith("agent:")) payload.owner_agent_id = form.assignee.slice(6);
       if (form.assignee.startsWith("human:")) payload.assigned_user_id = form.assignee.slice(6);
       if (form.project_id) payload.project_id = form.project_id;
+      payload.tags = form.tags.split(/[,\n]/).map((tag) => tag.trim().toLowerCase()).filter(Boolean);
       if (form.due_at) payload.due_at = new Date(form.due_at).toISOString();
       await request("/api/v1/tasks", { method: "POST", body: JSON.stringify(payload) });
       setDrawer(null);
@@ -540,6 +563,29 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
       if (session) await refreshAll(session.access_token);
     } catch (moveError) {
       setError(moveError instanceof Error ? moveError.message : "Could not update the task.");
+    }
+  }
+
+  function openDueDate(task: RecordValue) {
+    setDueTask(task);
+    setDueDateDraft(task.due_at ? new Date(String(task.due_at)).toISOString().slice(0, 16) : "");
+    setDrawer("dueDate");
+  }
+
+  async function saveDueDate() {
+    if (!dueTask || !dueDateDraft) {
+      setError("Choose the due date Lupe should use for this instruction.");
+      return;
+    }
+    try {
+      setError("");
+      await request(`/api/v1/tasks/${dueTask.id}`, { method: "PATCH", body: JSON.stringify({ due_at: new Date(dueDateDraft).toISOString() }) });
+      setDrawer(null);
+      setDueTask(null);
+      setDueDateDraft("");
+      if (session) await refreshAll(session.access_token);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not assign the due date.");
     }
   }
 
@@ -675,6 +721,30 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
       return laneMatch && searchMatch;
     });
   }, [lane, query, tasks]);
+  const taskTags = useMemo(() => [...new Set(tasks.flatMap((task) => Array.isArray(task.tags) ? task.tags.map((tag) => String(tag).trim().toLowerCase()).filter(Boolean) : []))].sort(), [tasks]);
+  const visibleBoardTasks = useMemo(() => visibleTasks.filter((task) => {
+    const projectMatch = boardProject === "all" || String(task.project_id || "general") === boardProject;
+    const tags = Array.isArray(task.tags) ? task.tags.map((tag) => String(tag).toLowerCase()) : [];
+    return projectMatch && (boardTag === "all" || tags.includes(boardTag));
+  }), [boardProject, boardTag, visibleTasks]);
+  const missingDueTasks = useMemo(() => visibleTasks.filter((task) => !task.due_at && !["done", "cancelled"].includes(taskStatus(task))), [visibleTasks]);
+  const sortedVisibleTasks = useMemo(() => {
+    const priorityRank: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+    const valueFor = (task: RecordValue) => {
+      if (listSort.key === "instruction") return text(task.title, "").toLowerCase();
+      if (listSort.key === "owner") return (profileMap.get(String(task.assigned_user_id)) || agentMap.get(String(task.owner_agent_id)) || "Unassigned").toLowerCase();
+      if (listSort.key === "priority") return priorityRank[text(task.priority, "medium")] ?? 9;
+      if (listSort.key === "status") return taskStatus(task);
+      if (listSort.key === "due") return task.due_at ? new Date(String(task.due_at)).getTime() : Number.MAX_SAFE_INTEGER;
+      return (projectMap.get(String(task.project_id)) || "General").toLowerCase();
+    };
+    return [...visibleTasks].sort((left, right) => {
+      const leftValue = valueFor(left);
+      const rightValue = valueFor(right);
+      const comparison = typeof leftValue === "number" && typeof rightValue === "number" ? leftValue - rightValue : String(leftValue).localeCompare(String(rightValue));
+      return listSort.direction === "asc" ? comparison : -comparison;
+    });
+  }, [agentMap, listSort, profileMap, projectMap, visibleTasks]);
 
   const pendingApprovals = approvals.filter((approval) => text(approval.status, "pending") === "pending");
   const dueToday = tasks.filter((task) => {
@@ -689,8 +759,6 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
     .sort((left, right) => new Date(String(left.publish_at)).getTime() - new Date(String(right.publish_at)).getTime());
   const reporting = agents.filter((agent) => latestUpdate.has(String(agent.id))).length;
   const activeTasks = tasks.filter((task) => !["done", "cancelled"].includes(taskStatus(task)));
-  const blockedTasks = activeTasks.filter((task) => taskStatus(task) === "blocked");
-  const overdueTasks = activeTasks.filter((task) => task.due_at && new Date(String(task.due_at)) < new Date());
   const contentPropertyMap = useMemo(
     () => new Map(contentProperties.map((property) => [String(property.id), property])),
     [contentProperties],
@@ -735,6 +803,21 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   function contentTypeName(item: RecordValue) {
     return text(contentTypeMap.get(String(item.content_type_id))?.name, "K2 to decide");
   }
+
+  function contentOwnerDisplay(item: RecordValue) {
+    const assigned = agentMap.get(String(item.owner_agent_id));
+    if (assigned) return assigned;
+    const status = text(item.status, "").toLowerCase();
+    const format = contentTypeName(item).toLowerCase();
+    if (text(item.distribution_mode, "organic") === "paid") return "Rex · inferred";
+    if (format.includes("research") || status.startsWith("research_")) return "K2 · inferred";
+    if (["ready_for_tito", "revision_required"].includes(status)) return "Tito · approval";
+    if (["editorial_ready", "drafting", "qa_in_progress"].includes(status)) return "C-3PO · inferred";
+    return "Lupe · inferred";
+  }
+
+  const contentYouPostToday = contentDueToday.filter((item) => contentPlatformForItem(item).toLowerCase() === "instagram");
+  const contentAgentsPostToday = contentDueToday.filter((item) => contentPlatformForItem(item).toLowerCase() !== "instagram");
 
   function contentPictureUrl(item: RecordValue) {
     return contentMediaUrls[String(item.id)] || "";
@@ -889,8 +972,8 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   }
 
   async function saveContent() {
-    if (!contentForm.title.trim() || !contentForm.property_id || !contentForm.channel_id) {
-      setError("Content requires a title, property, and publishing channel.");
+    if (!contentForm.title.trim() || !contentForm.property_id || !contentForm.channel_id || !contentForm.owner_agent_id) {
+      setError("Content requires a title, property, publishing channel, and owner.");
       return;
     }
     const chosenProperty = contentProperties.find((property) => String(property.id) === contentForm.property_id);
@@ -1038,31 +1121,30 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
     setDrawer("agent");
   }
 
-  function openCommandReview(title: string, summary: string, items: CommandReviewItem[]) {
-    setSelectedReviewItem(null);
-    setCommandReview({ title, summary, items });
-  }
-
   function openTaskReview(task: RecordValue) {
     const id = String(task.id);
-    taskOpenedFromBoard.current = true;
-    window.history.pushState({ occTaskId: id }, "", `/tasks/${encodeURIComponent(id)}`);
-    setSelectedTaskId(id);
+    router.push(`/kanban/${encodeURIComponent(id)}`);
   }
 
   function closeTaskDetail() {
-    setSelectedTaskId("");
-    if (taskOpenedFromBoard.current && window.history.state?.occTaskId) {
-      taskOpenedFromBoard.current = false;
-      window.history.back();
-      return;
-    }
-    window.history.replaceState({}, "", "/");
+    router.push("/kanban");
   }
 
   function closeCommandReview() {
     setCommandReview(null);
     setSelectedReviewItem(null);
+  }
+
+  function blockerReason(task: RecordValue) {
+    const metadata = task.metadata && typeof task.metadata === "object" ? task.metadata as RecordValue : {};
+    const explicit = task.blocker || task.blocked_reason || metadata.blocker || metadata.blocked_reason;
+    if (explicit) return text(explicit);
+    const description = text(task.description, "Blocker detail has not been documented.");
+    return description.length > 280 ? `${description.slice(0, 277)}…` : description;
+  }
+
+  function toggleListSort(key: ListSortKey) {
+    setListSort((current) => current.key === key ? { key, direction: current.direction === "asc" ? "desc" : "asc" } : { key, direction: "asc" });
   }
 
   function reviewItemTitle(item: CommandReviewItem) {
@@ -1088,18 +1170,41 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
         ]} />
 
         <section className="deckPanel commandBrief">
-          <PanelHeader eyebrow="Daily brief" title={todayLabel} meta="Live operational readout" />
-          <div className="briefSnapshot">
-            <button onClick={() => openCommandReview("Today’s focus", `${dueToday.length} instructions and ${contentDueToday.length} publications are due today.`, [...contentDueToday.map((record) => ({ kind: "content" as const, record })), ...dueToday.map((record) => ({ kind: "task" as const, record }))])}><span>Today’s focus</span><p>{dueToday.length || contentDueToday.length ? `${dueToday.length} instructions and ${contentDueToday.length} publications are due today. ${[...contentDueToday, ...dueToday].slice(0, 3).map((item) => text(item.title)).join(" · ")}` : "No instructions or publications are due today; use the window to clear review-stage work."}</p><small>Review items →</small></button>
-            <button className={pendingApprovals.length ? "attention" : ""} onClick={() => openCommandReview("Your attention", `${pendingApprovals.length} approval packages await a decision.`, pendingApprovals.map((record) => ({ kind: "approval", record })))}><span>Your attention</span><p>{pendingApprovals.length ? `${pendingApprovals.length} approval package${pendingApprovals.length === 1 ? "" : "s"} need your decision.` : "No approval decisions are waiting."}</p><small>Review items →</small></button>
-            <button className={blockedTasks.length || overdueTasks.length ? "attention" : ""} onClick={() => { const records = [...new Map([...blockedTasks, ...overdueTasks].map((record) => [String(record.id), record])).values()]; openCommandReview("Watch list", `${blockedTasks.length} blocked and ${overdueTasks.length} overdue instructions require attention.`, records.map((record) => ({ kind: "task", record }))); }}><span>Watch list</span><p>{blockedTasks.length || overdueTasks.length ? `${blockedTasks.length} blocked · ${overdueTasks.length} overdue. Lupe should resolve these before new work begins.` : "Nothing is blocked or overdue."}</p><small>Review items →</small></button>
-            <button className={reporting < agents.length ? "attention" : ""} onClick={() => openCommandReview("Reporting", `${reporting} of ${agents.length} lanes have reported.`, agents.map((record) => ({ kind: "agent", record })))}><span>Reporting</span><p>{reporting} of {agents.length} lanes have reported. {agents.length - reporting ? `${agents.length - reporting} updates are still missing.` : "The full roster is accounted for."}</p><small>Review lanes →</small></button>
+          <PanelHeader eyebrow="Daily stand-up" title={todayLabel} meta={<>{reporting}/{agents.length} reported</>} />
+          <div className="standupTable" role="table" aria-label={`Agent stand-up for ${todayLabel}`}>
+            <div className="standupHead" role="row">
+              <span role="columnheader">Agent</span>
+              <span role="columnheader">Yesterday</span>
+              <span role="columnheader">Today</span>
+              <span role="columnheader">Blockers</span>
+            </div>
+            {agents.map((agent) => {
+              const agentId = String(agent.id);
+              const update = latestUpdate.get(agentId);
+              const owned = activeTasks.filter((task) => String(task.owner_agent_id) === agentId);
+              const blocked = owned.filter((task) => taskStatus(task) === "blocked");
+              const yesterday = text(update?.completed || update?.summary, "No update submitted.");
+              const today = text(update?.next_steps, owned.length ? owned.slice(0, 2).map((task) => text(task.title)).join(" · ") : "No active work assigned.");
+              const blocker = text(update?.blockers, blocked.length ? blocked.map((task) => text(task.title)).join(" · ") : "None reported.");
+              const hasBlocker = blocker !== "None reported.";
+              return (
+                <button className="standupRow" role="row" key={agentId} onClick={() => openAgent(agent)}>
+                  <span className="standupAgent" role="cell">
+                    <AgentMark large>{initials(agent.code || agent.name)}</AgentMark>
+                    <span><b>{text(agent.name || agent.code)}</b><small>{update ? `Reported ${dateLabel(update.update_date)}` : "Update missing"}</small></span>
+                  </span>
+                  <span className="standupReport" role="cell"><small>Yesterday</small>{yesterday}</span>
+                  <span className="standupReport" role="cell"><small>Today</small>{today}</span>
+                  <span className={`standupReport blocker${hasBlocker ? " active" : ""}`} role="cell"><small>Blockers</small>{blocker}</span>
+                </button>
+              );
+            })}
           </div>
         </section>
 
         <div className="commandSnapshots">
           <section className="deckPanel miniKanban">
-            <PanelHeader eyebrow="Kanban snapshot" title="Work in motion" action={<button className="textLink compactLink" onClick={() => setView("kanban")}>Open board →</button>} />
+            <PanelHeader eyebrow="Kanban snapshot" title="Work in motion" action={<button className="textLink compactLink" onClick={() => navigateToView("kanban")}>Open board →</button>} />
             <div className="miniKanbanGrid">
               {STATUS_COLUMNS.map((column) => {
                 const items = tasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
@@ -1109,49 +1214,41 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
           </section>
 
           <section className="deckPanel todayCalendar">
-            <PanelHeader eyebrow="Today’s calendar" title="Content going live" meta={<>{contentDueToday.length} scheduled</>} />
-            <div className="todaySchedule">
-              {contentDueToday.map((item) => (
-                <article key={String(item.id)}>
-                  <time>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</time>
-                  <div><b>{text(item.title)}</b><small>{contentAccountName(item)} · {contentTypeName(item)}</small></div>
-                  <span>{contentPlatformForItem(item)}</span>
-                </article>
+            <PanelHeader eyebrow="Today’s publishing" title="Who posts what" meta={<>{contentDueToday.length} scheduled</>} />
+            <div className="publishingOwners">
+              {[
+                { title: "You post", note: "Instagram · manual publishing", items: contentYouPostToday },
+                { title: "Agents post", note: "Automated and delegated channels", items: contentAgentsPostToday },
+              ].map((group) => (
+                <section className="publishingGroup" key={group.title}>
+                  <header><span>{group.title}</span><small>{group.note}</small><b>{String(group.items.length).padStart(2, "0")}</b></header>
+                  <div className="todaySchedule">
+                    {group.items.map((item) => (
+                      <button key={String(item.id)} onClick={() => previewContent(item)}>
+                        <time>{new Intl.DateTimeFormat("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }).format(new Date(String(item.publish_at)))}</time>
+                        <span><b>{text(item.title)}</b><small>{contentAccountName(item)} · {contentTypeName(item)}</small></span>
+                      </button>
+                    ))}
+                    {!group.items.length && <p>Nothing assigned.</p>}
+                  </div>
+                </section>
               ))}
-              {!contentDueToday.length && <div className="emptySchedule"><b>No content scheduled today.</b><span>Approved content appears here after Lupe records its publishing time.</span></div>}
             </div>
           </section>
         </div>
 
         <div className="commandGrid">
-          <section className="deckPanel teamPanel">
-            <PanelHeader eyebrow="Roster state" title="Agent operating lanes" meta="Click a lane to inspect" />
-            {agents.map((agent) => {
-              const owned = activeTasks.filter((task) => String(task.owner_agent_id) === String(agent.id));
-              const update = latestUpdate.get(String(agent.id));
-              return (
-                <button className="teamRow" key={String(agent.id)} onClick={() => openAgent(agent)}>
-                  <AgentMark large>{initials(agent.code || agent.name)}</AgentMark>
-                  <span className="agentIdentity"><b>{text(agent.name || agent.code)}</b><small>{text(agent.role, "Agent")}</small></span>
-                  <span className="agentFocus">{text(agent.lane || agent.charter, "Operating lane")}</span>
-                  <strong>{String(owned.length).padStart(2, "0")}</strong>
-                  <span className="reportState"><b className={update ? "" : "missing"}>{update ? "Reported" : "Missing"}</b><small>{update ? dateLabel(update.update_date) : "No update"}</small></span>
-                </button>
-              );
-            })}
-          </section>
-
-          <div className="sideStack">
+          <div className="sideStack commandAttention">
             <section className="deckPanel">
               <PanelHeader eyebrow="Needs direction" title="Approval queue" meta={<>{pendingApprovals.length} open</>} />
               {pendingApprovals.slice(0, 4).map((approval) => (
-                <button className="decisionRow" key={String(approval.id)} onClick={() => setView("approvals")}>
+                <button className="decisionRow" key={String(approval.id)} onClick={() => navigateToView("approvals")}>
                   <b>{text(approval.title, "Untitled approval")}</b>
                   <small><i>Pending</i> · {dateLabel(approval.due_at)}</small>
                 </button>
               ))}
               {!pendingApprovals.length && <p className="opsEmpty">No decisions waiting.</p>}
-              <button className="textLink" onClick={() => setView("approvals")}>Open approval queue →</button>
+              <button className="textLink" onClick={() => navigateToView("approvals")}>Open approval queue →</button>
             </section>
 
             <section className="deckPanel">
@@ -1168,18 +1265,24 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
   }
 
   function renderList() {
+    const sortHeader = (key: ListSortKey, label: string) => (
+      <span role="columnheader" aria-sort={listSort.key === key ? (listSort.direction === "asc" ? "ascending" : "descending") : "none"}>
+        <button onClick={() => toggleListSort(key)}>{label}<i aria-hidden="true">{listSort.key === key ? (listSort.direction === "asc" ? "↑" : "↓") : "↕"}</i></button>
+      </span>
+    );
     return (
       <section className="deckPanel ledger">
         <PanelHeader eyebrow="Instruction ledger" title={`${visibleTasks.length} visible instructions`} meta="Live from Supabase" />
-        <div className="ledgerHead"><span /><span>Instruction</span><span>Owner</span><span>Priority</span><span>Status</span><span>Due</span><span>Project</span></div>
-        {visibleTasks.map((task) => (
-          <div className="ledgerRow" key={String(task.id)}>
-            <button className={`squareCheck ${taskStatus(task) === "done" ? "done" : ""}`} onClick={() => void moveTask(task, taskStatus(task) === "done" ? "in_progress" : "done")} aria-label="Toggle completion"><i /></button>
+        {missingDueTasks.length > 0 && <button className="dueDateAsk" onClick={() => openDueDate(missingDueTasks[0])}><AgentMark>L</AgentMark><span><b>Tito, Lupe needs {missingDueTasks.length} due date{missingDueTasks.length === 1 ? "" : "s"}.</b><small>Assign the first missing deadline →</small></span></button>}
+        <div className="ledgerHead" role="row"><span />{sortHeader("instruction", "Instruction")}{sortHeader("owner", "Owner")}{sortHeader("priority", "Priority")}{sortHeader("status", "Status")}{sortHeader("due", "Due")}{sortHeader("project", "Project")}</div>
+        {sortedVisibleTasks.map((task) => (
+          <div className="ledgerRow clickable" key={String(task.id)} role="button" tabIndex={0} aria-label={`Open ticket ${text(task.title)}`} onClick={() => openTaskReview(task)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTaskReview(task); } }}>
+            <button className={`squareCheck ${taskStatus(task) === "done" ? "done" : ""}`} onClick={(event) => { event.stopPropagation(); void moveTask(task, taskStatus(task) === "done" ? "in_progress" : "done"); }} aria-label="Toggle completion"><i /></button>
             <span className="instruction"><b className={taskStatus(task) === "done" ? "struck" : ""}>{text(task.title)}</b><small>{text(task.description, "No context documented")}</small></span>
-            <button className="ownerLink" onClick={() => { const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{taskAssigneeName(task)}</button>
+            <button className="ownerLink" onClick={(event) => { event.stopPropagation(); const agent = agents.find((item) => String(item.id) === String(task.owner_agent_id)); if (agent) openAgent(agent); }}>{taskAssigneeName(task)}</button>
             <span className={text(task.priority) === "urgent" ? "urgent" : ""}>{text(task.priority, "medium")}</span>
-            <StatusPill status={taskStatus(task)}>{statusLabel(taskStatus(task))}</StatusPill>
-            <span>{dateLabel(task.due_at)}</span>
+            <span className="statusCell" title={taskStatus(task) === "blocked" ? blockerReason(task) : undefined}><StatusPill status={taskStatus(task)}>{statusLabel(taskStatus(task))}</StatusPill>{taskStatus(task) === "blocked" && <span className="blockerTooltip" role="tooltip">{blockerReason(task)}</span>}</span>
+            {task.due_at ? <span>{dateLabel(task.due_at)}</span> : <button className="missingDue" onClick={(event) => { event.stopPropagation(); openDueDate(task); }}>Due date needed</button>}
             <span>{projectMap.get(String(task.project_id)) || "General"}</span>
           </div>
         ))}
@@ -1191,19 +1294,28 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
 
   function renderKanban() {
     return (
-      <div className="kanbanDeck">
+      <div className="kanbanBoard">
+        <section className="kanbanToolbar" aria-label="Kanban filters">
+          <span>Filter tickets</span>
+          <label>Project<select value={boardProject} onChange={(event) => setBoardProject(event.target.value)}><option value="all">All projects</option><option value="general">General</option>{projects.map((project) => <option key={String(project.id)} value={String(project.id)}>{text(project.name || project.slug)}</option>)}</select></label>
+          <label>Tag<select value={boardTag} onChange={(event) => setBoardTag(event.target.value)}><option value="all">All tags</option>{taskTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}</select></label>
+          {(boardProject !== "all" || boardTag !== "all") && <button className="ghostBtn" onClick={() => { setBoardProject("all"); setBoardTag("all"); }}>Clear filters</button>}
+          <small>{visibleBoardTasks.length} ticket{visibleBoardTasks.length === 1 ? "" : "s"}</small>
+        </section>
+        <div className={`kanbanDeck${dragTaskId ? " isDragging" : ""}`}>
         {STATUS_COLUMNS.map((column) => {
-          const items = visibleTasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
+          const items = visibleBoardTasks.filter((task) => taskStatus(task) === column.id || (column.id === "in_progress" && taskStatus(task) === "blocked"));
           return (
-            <section className="kanbanColumn" key={column.id}>
+            <section className={`kanbanColumn${dropStatus === column.id ? " dropTarget" : ""}`} key={column.id} onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = "move"; setDropStatus(column.id); }} onDragLeave={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node)) setDropStatus(""); }} onDrop={(event) => { event.preventDefault(); const taskId = event.dataTransfer.getData("text/plain") || dragTaskId; const task = tasks.find((item) => String(item.id) === taskId); setDragTaskId(""); setDropStatus(""); if (task && taskStatus(task) !== column.id) void moveTask(task, column.id); }}>
               <header><span><i />{column.label}</span><b>{String(items.length).padStart(2, "0")}</b></header>
               <p>{column.note}</p>
               <div>
                 {items.map((task) => (
-                  <article key={String(task.id)} className="kanbanTicket" role="button" tabIndex={0} aria-label={`Open ticket ${text(task.title)}`} onClick={() => openTaskReview(task)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTaskReview(task); } }}>
-                    <header><span>{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
+                  <article key={String(task.id)} className={`kanbanTicket${dragTaskId === String(task.id) ? " dragging" : ""}`} draggable role="button" tabIndex={0} aria-label={`Open ticket ${text(task.title)}. Drag to change status.`} onDragStart={(event) => { const id = String(task.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", id); setDragTaskId(id); }} onDragEnd={() => { setDragTaskId(""); setDropStatus(""); }} onClick={() => openTaskReview(task)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTaskReview(task); } }}>
+                    <header><span className="projectTag">{projectMap.get(String(task.project_id)) || "General"}</span><em>{text(task.priority, "medium")}</em></header>
                     <h3>{text(task.title)}</h3>
                     <p>{text(task.description, "No context documented.")}</p>
+                    {Array.isArray(task.tags) && task.tags.length > 0 && <div className="ticketTags">{task.tags.map((tag) => <span key={String(tag)}>{String(tag)}</span>)}</div>}
                     <footer><span><AgentMark>{initials(taskAssigneeName(task))}</AgentMark>{taskAssigneeName(task)}</span>
                       {column.id !== "done" && <button onClick={(event) => { event.stopPropagation(); void moveTask(task, column.id === "inbox" ? "in_progress" : column.id === "in_progress" ? "review" : "done"); }}>Advance →</button>}
                     </footer>
@@ -1214,6 +1326,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
             </section>
           );
         })}
+        </div>
       </div>
     );
   }
@@ -1312,7 +1425,8 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
       day.setDate(gridStart.getDate() + index);
       return day;
     });
-    const selectedProperty = contentProperties.find((property) => String(property.id) === selectedPropertyId) || contentProperties[0];
+    const visibleProperties = contentProperties.filter((property) => text(property.name, "").trim().toLowerCase() !== "humanismo evolutivo");
+    const selectedProperty = visibleProperties.find((property) => String(property.id) === selectedPropertyId) || visibleProperties[0];
     const propertyChannels = selectedProperty ? contentChannels.filter((channel) => String(channel.property_id) === String(selectedProperty.id)) : [];
     const propertyPlatforms = [...new Set(propertyChannels.map((channel) => text(channel.platform)).filter(Boolean))];
     const activePropertyPlatform = propertyPlatforms.includes(selectedPropertyPlatform) ? selectedPropertyPlatform : (propertyPlatforms[0] || "");
@@ -1345,23 +1459,26 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
         <section className="deckPanel propertyPanel">
           <PanelHeader eyebrow="Properties" title="Channel preview" meta="See the feed before it publishes" />
           <div className="propertyTabs" role="tablist" aria-label="Publishing properties">
-            {contentProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
+            {visibleProperties.map((property, index) => <button key={String(property.id)} role="tab" aria-selected={String(property.id) === String(selectedProperty?.id)} className={String(property.id) === String(selectedProperty?.id) ? "active" : ""} onClick={() => { setSelectedPropertyId(String(property.id)); const firstChannel = contentChannels.find((channel) => String(channel.property_id) === String(property.id)); setSelectedPropertyPlatform(text(firstChannel?.platform, "")); setFeedPreviewOpen(false); }}><i className={`propertyTone tone${index % 4}`} />{text(property.name)}<small>{text(property.status)}</small></button>)}
           </div>
           {selectedProperty && <div className="propertyPreview">
-            <div className="platformTabs" role="tablist" aria-label={`${text(selectedProperty.name)} platforms`}>
-              {propertyPlatforms.map((platform) => <button key={platform} role="tab" aria-selected={platform === activePropertyPlatform} className={platform === activePropertyPlatform ? "active" : ""} onClick={() => setSelectedPropertyPlatform(platform)}>{platform}</button>)}
-            </div>
-            <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
-            <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
-              {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
-                {contentPictureUrl(item) ? <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={contentPictureUrl(item)} alt={`Preview for ${text(item.title)}`} />
-                </> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
-                <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
-              </button>)}
-              {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
-            </div>
+            <header className="feedPreviewSummary"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{propertyPlatforms.join(" · ")} · {previewItems.length} feed item{previewItems.length === 1 ? "" : "s"}</small></div><button className="outlineBtn" aria-expanded={feedPreviewOpen} onClick={() => setFeedPreviewOpen((open) => !open)}>{feedPreviewOpen ? "Close preview" : "Feed Preview"}</button></header>
+            {feedPreviewOpen && <div className="feedPreviewExpanded">
+              <div className="platformTabs" role="tablist" aria-label={`${text(selectedProperty.name)} platforms`}>
+                {propertyPlatforms.map((platform) => <button key={platform} role="tab" aria-selected={platform === activePropertyPlatform} className={platform === activePropertyPlatform ? "active" : ""} onClick={() => setSelectedPropertyPlatform(platform)}>{platform}</button>)}
+              </div>
+              <header className="feedIdentity"><span className="feedAvatar">{initials(selectedProperty.name)}</span><div><b>{text(selectedProperty.name)}</b><small>{activePropertyPlatform} · {text(selectedProperty.status)}</small></div></header>
+              <div className={`feedPreview ${activePropertyPlatform.toLowerCase()}`}>
+                {previewItems.map((item) => <button key={String(item.id)} onClick={() => previewContent(item)}>
+                  {contentPictureUrl(item) ? <>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={contentPictureUrl(item)} alt={`Preview for ${text(item.title)}`} />
+                  </> : <span className="feedPlaceholder"><b>{initials(selectedProperty.name)}</b><small>Creative pending</small></span>}
+                  <span><b>{text(item.title)}</b><small>{item.publish_at ? dateLabel(item.publish_at) : CONTENT_STATUS_LABELS[text(item.status)]}</small></span>
+                </button>)}
+                {!previewItems.length && <p className="opsEmpty">No {activePropertyPlatform.toLowerCase()} content has been created for this property yet.</p>}
+              </div>
+            </div>}
           </div>}
         </section>
 
@@ -1519,7 +1636,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
         </div>
         <nav className="mobileViewStrip" aria-label="Operations views">
           {VIEWS.map((item) => (
-            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>{item.label}</button>
+            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateToView(item.id)}>{item.label}</button>
           ))}
         </nav>
       </header>
@@ -1534,7 +1651,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
         <div className="rule" />
         <nav className="deckNav">
           {VIEWS.map((item) => (
-            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
+            <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateToView(item.id)}>
               <i /><span>{item.label}</span><em>{item.id === "approvals" ? String(pendingApprovals.length).padStart(2, "0") : item.id === "list" ? String(tasks.length).padStart(2, "0") : item.id === "worklogs" ? String(workLogs.length).padStart(2, "0") : item.id === "content" ? String(contentItems.length).padStart(2, "0") : item.id === "leads" ? String(leads.filter((lead) => text(lead.status) === "new").length).padStart(2, "0") : ""}</em>
             </button>
           ))}
@@ -1584,7 +1701,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
           { id: "content" as View, label: "Content", badge: String(contentItems.length).padStart(2, "0") },
           { id: "approvals" as View, label: "Queue", badge: String(pendingApprovals.length).padStart(2, "0") },
         ]).map((item) => (
-          <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => setView(item.id)}>
+          <button key={item.id} className={view === item.id ? "active" : ""} onClick={() => navigateToView(item.id)}>
             <i /><span>{item.label}</span>{item.badge && <em>{item.badge}</em>}
           </button>
         ))}
@@ -1615,7 +1732,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
                 {selectedReviewItem.kind === "approval" && <>
                   <div className="briefLine"><span>Summary</span><p>{text(selectedReviewItem.record.summary, "No summary documented.")}</p></div>
                   <div className="briefLine"><span>Recommendation</span><p>{text(selectedReviewItem.record.recommendation, "No recommendation documented.")}</p></div>
-                  <button className="liveBtn reviewPrimary" onClick={() => { closeCommandReview(); setView("approvals"); }}>Open approval queue</button>
+                  <button className="liveBtn reviewPrimary" onClick={() => { closeCommandReview(); navigateToView("approvals"); }}>Open approval queue</button>
                 </>}
                 {selectedReviewItem.kind === "agent" && (() => { const update = latestUpdate.get(String(selectedReviewItem.record.id)); return <>
                   <div className="briefLine"><span>Operating lane</span><p>{text(selectedReviewItem.record.lane || selectedReviewItem.record.charter, "No lane documented.")}</p></div>
@@ -1647,9 +1764,19 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
                 <label>Context<textarea value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} /></label>
                 <div className="formPair"><label>Assignee<select value={form.assignee} onChange={(event) => setForm({ ...form, assignee: event.target.value })}><option value="">Unassigned</option><optgroup label="People">{profiles.map((profile) => <option key={String(profile.user_id)} value={`human:${String(profile.user_id)}`}>{text(profile.display_name)}</option>)}</optgroup><optgroup label="Agents">{agents.map((agent) => <option key={String(agent.id)} value={`agent:${String(agent.id)}`}>{text(agent.name || agent.code)}</option>)}</optgroup></select></label>
                   <label>Project<select value={form.project_id} onChange={(event) => setForm({ ...form, project_id: event.target.value })}><option value="">General</option>{projects.map((project) => <option key={String(project.id)} value={String(project.id)}>{text(project.name || project.slug)}</option>)}</select></label></div>
-                <div className="formPair"><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Due<input type="datetime-local" value={form.due_at} onChange={(event) => setForm({ ...form, due_at: event.target.value })} /></label></div>
+                <label>Tags<input value={form.tags} onChange={(event) => setForm({ ...form, tags: event.target.value })} placeholder="e.g. launch, operations, paid-media" /><small>Separate tags with commas. Lupe can introduce a new tag simply by naming it here.</small></label>
+                <div className="formPair"><label>Priority<select value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value })}><option value="urgent">Urgent</option><option value="high">High</option><option value="medium">Medium</option><option value="low">Low</option></select></label><label>Due · required<input required type="datetime-local" value={form.due_at} onChange={(event) => setForm({ ...form, due_at: event.target.value })} /></label></div>
                 <label>Definition of done<textarea value={form.definition_of_done} onChange={(event) => setForm({ ...form, definition_of_done: event.target.value })} /></label>
                 <button className="liveBtn full" type="submit">Issue instruction</button>
+              </form>
+            )}
+            {drawer === "dueDate" && dueTask && (
+              <form onSubmit={(event) => { event.preventDefault(); void saveDueDate(); }}>
+                <LiveLabel>Lupe needs direction</LiveLabel>
+                <h2>When is this due?</h2>
+                <p>{text(dueTask.title)}</p>
+                <label>Due date and time<input required autoFocus type="datetime-local" value={dueDateDraft} onChange={(event) => setDueDateDraft(event.target.value)} /></label>
+                <button className="liveBtn full" type="submit">Assign due date</button>
               </form>
             )}
             {drawer === "contentPreview" && selectedContent && (
@@ -1659,6 +1786,12 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
                 <div className="contentPreviewMeta">
                   <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
                 </div>
+                {!['approved', 'scheduled', 'published', 'completed', 'cancelled', 'archived'].includes(text(selectedContent.status)) && <section className="contentQuickApproval">
+                  <div><span>Platform</span><b>{contentPlatformForItem(selectedContent)}</b></div>
+                  <div><span>Publishes</span><b>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Date not set"}</b></div>
+                  <div><span>Owner</span><b>{contentOwnerDisplay(selectedContent)}</b></div>
+                  <div className="contentQuickActions"><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Request changes</button><button className="liveBtn" disabled={reviewSaving || !selectedContent.channel_id} onClick={() => { if (!selectedContent.publish_at) openContent(selectedContent); else void reviewContent(selectedContent, "approved"); }}>{reviewSaving ? "Recording…" : !selectedContent.publish_at ? "Add date to approve" : "Approve content"}</button></div>
+                </section>}
                 <article className={`contentPostMockup ${contentPlatformForItem(selectedContent).toLowerCase()}`}>
                   <header><span className="feedAvatar">{initials(contentPropertyName(selectedContent))}</span><div><b>{contentPropertyName(selectedContent)}</b><small>{contentAccountName(selectedContent)}</small></div><span>•••</span></header>
                   {contentPictureUrl(selectedContent) ? (
@@ -1667,9 +1800,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
                       <img src={contentPictureUrl(selectedContent)} alt={`Creative for ${text(selectedContent.title)}`} />
                       <figcaption>Original stored creative · secure preview</figcaption>
                     </figure>
-                  ) : (
-                    <div className="contentCreativeEmpty"><span>{initials(contentPropertyName(selectedContent))}</span><b>{contentCreativePath(selectedContent) ? "Creative file unavailable" : "No creative attached yet"}</b><small>{contentCreativePath(selectedContent) ? `The record is attached to ${contentCreativePath(selectedContent)}, but Storage could not resolve it${contentMediaErrors[String(selectedContent.id)] ? `: ${contentMediaErrors[String(selectedContent.id)]}` : "."}` : "Add the final image in Edit content so it can be previewed and downloaded here."}</small></div>
-                  )}
+                  ) : null}
                   <div className="contentPostSignals" aria-hidden="true"><span>♡</span><span>○</span><span>⌁</span><span>▱</span></div>
                   <section className="contentPostCaption"><b>{contentAccountName(selectedContent)}</b><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
                   {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && <div className="contentPostUtilityActions">
@@ -1680,18 +1811,13 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
                 </article>
                 {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
                 {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
-                {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && isContentReviewable(selectedContent.status) && <section className="contentReviewDecision">
-                  <span>Review decision</span>
-                  <p>Approve this post for its documented date, or reject it and leave specific feedback for Lupe and {agentMap.get(String(selectedContent.owner_agent_id)) || "the content owner"}.</p>
-                  <div><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Reject</button><button className="liveBtn" disabled={reviewSaving} onClick={() => void reviewContent(selectedContent, "approved")}>Approve</button></div>
-                  {!selectedContent.publish_at && <small>Add a publish date before approval to place this post directly on the calendar.</small>}
-                </section>}
                 <dl className="contentPreviewFacts">
-                  <div><dt>Publishes</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Not scheduled"}</dd></div>
+                  <div><dt>Publication date</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Date not set"}</dd></div>
+                  <div><dt>Platform</dt><dd>{contentPlatformForItem(selectedContent)}</dd></div>
                   <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
-                  <div><dt>Owner</dt><dd>{agentMap.get(String(selectedContent.owner_agent_id)) || "Unassigned"}</dd></div>
+                  <div><dt>Owner</dt><dd>{contentOwnerDisplay(selectedContent)}</dd></div>
                   <div><dt>Distribution</dt><dd>{text(selectedContent.distribution_mode)}</dd></div>
-                  <div><dt>Post image asset</dt><dd>{contentCreativePath(selectedContent) || "Not uploaded"}</dd></div>
+                  {contentCreativePath(selectedContent) && <div><dt>Post image asset</dt><dd>{contentCreativePath(selectedContent)}</dd></div>}
                   <div><dt>Publication proof</dt><dd>{selectedContent.screenshot_path ? "Screenshot stored separately" : "Not recorded"}</dd></div>
                 </dl>
                 <div className="previewActions">
@@ -1758,8 +1884,8 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
                 </div>
                 <div className="formPair">
                   <label>Owner
-                    <select value={contentForm.owner_agent_id} onChange={(event) => setContentForm({ ...contentForm, owner_agent_id: event.target.value })}>
-                      <option value="">Unassigned</option>
+                    <select required value={contentForm.owner_agent_id} onChange={(event) => setContentForm({ ...contentForm, owner_agent_id: event.target.value })}>
+                      <option value="" disabled>Choose owner</option>
                       {agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}
                     </select>
                   </label>
@@ -1830,7 +1956,7 @@ export function CommandCenter({ initialTaskId = "" }: { initialTaskId?: string }
               const update = latestUpdate.get(String(selectedAgent.id));
               return <div><div className="agentDrawerHead"><AgentMark large>{initials(selectedAgent.code || selectedAgent.name)}</AgentMark><div><LiveLabel>Agent space</LiveLabel><h2>{text(selectedAgent.name || selectedAgent.code)}</h2></div></div><p>{text(selectedAgent.charter || selectedAgent.lane, "No charter documented.")}</p><div className="drawerActionRow"><button className="outlineBtn" onClick={() => openAgentForm(selectedAgent)}>Edit agent</button><button className="outlineBtn" onClick={() => openWorkLog(String(selectedAgent.id))}>Add work log</button><button className="liveBtn" onClick={() => openDailyUpdate(String(selectedAgent.id))}>Daily update</button></div>
                 <div className="agentStats"><div><b>{mine.filter((task) => !["done", "cancelled"].includes(taskStatus(task))).length}</b><span>Open</span></div><div><b>{mine.filter((task) => taskStatus(task) === "review").length}</b><span>Review</span></div><div><b>{mine.filter((task) => taskStatus(task) === "done").length}</b><span>Closed</span></div></div>
-                <h3>Instructions</h3>{mine.map((task) => <button className="drawerTask" key={String(task.id)} onClick={() => { setLane(String(selectedAgent.id)); setView("list"); setDrawer(null); }}><span>{statusLabel(taskStatus(task))}</span><b>{text(task.title)}</b><small>{dateLabel(task.due_at)}</small></button>)}
+                <h3>Instructions</h3>{mine.map((task) => <button className="drawerTask" key={String(task.id)} onClick={() => { setLane(String(selectedAgent.id)); navigateToView("list"); setDrawer(null); }}><span>{statusLabel(taskStatus(task))}</span><b>{text(task.title)}</b><small>{dateLabel(task.due_at)}</small></button>)}
                 <h3>Latest daily update</h3>{update ? <><div className="briefLine"><span>Summary</span><p>{text(update.summary)}</p></div><div className="briefLine"><span>Blockers</span><p>{Array.isArray(update.blockers) ? update.blockers.join(" · ") : text(update.blockers, "None reported")}</p></div><div className="briefLine"><span>Next</span><p>{Array.isArray(update.next_steps) ? update.next_steps.join(" · ") : text(update.next_steps, "Not reported")}</p></div></> : <p>No daily update has been submitted.</p>}</div>;
             })()}
             {drawer === "brief" && (
