@@ -1,7 +1,6 @@
 import { isApiError, requireMember } from "../../../../../../utils/api/auth";
 import { fail, ok, preflight, readJson } from "../../../../../../utils/api/responses";
 import { buildLinkedInPublicationSnapshot, type LinkedInMedia, type LinkedInPublicationPayload } from "../../../../../../utils/content-automation/linkedin-publication";
-import { disabledAutomationResult, shouldBlockHerzenCoContentOperation } from "../../../../../../utils/content-automation/retirement";
 import { createAutomationClient } from "../../../../../../utils/content-automation/server";
 
 type RouteContext = { params: Promise<{ id: string }> };
@@ -24,10 +23,6 @@ async function loadSnapshot(contentItemId: string) {
     supabase.from("content_feedback").select("required,status").eq("content_item_id", item.id),
   ]);
   if (propertyResult.error || !propertyResult.data) return { error: fail(409, "property_missing", "The content item's property could not be resolved.") };
-  if (shouldBlockHerzenCoContentOperation(String(propertyResult.data.slug || ""))) {
-    const retirement = disabledAutomationResult("linkedin_publication");
-    return { error: fail(409, retirement.code, retirement.message, retirement) };
-  }
   if (channelResult.error || !channelResult.data) return { error: fail(409, "channel_missing", "The content item's channel could not be resolved.") };
   if (assetResult.error) return { error: fail(409, "assets_unavailable", assetResult.error.message) };
   if (feedbackResult.error) return { error: fail(409, "feedback_unavailable", feedbackResult.error.message) };
