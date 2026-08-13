@@ -115,7 +115,7 @@ async function ensureLupeWorkItem(supabase: SupabaseClient, item: Row, lupeId: s
   if (reviewUrlError) throw reviewUrlError;
   Object.assign(item, { human_review_url: reviewUrl, review_url: reviewUrl });
   const payload = { agent_id: lupeId, work_item_type: "review", title: `Monthly content acceptance: ${item.title}`, summary: "QA passed; verify package and route to Tito.", status: "ready", content_item_id: item.id, lane: "monthly_content_lupe", attachments: [{ label: "OCC review", url: reviewUrl }] };
-  const { data: existing, error: readError } = await supabase.from("agent_work_items").select("id").eq("content_item_id", item.id).eq("lane", "monthly_content_lupe").maybeSingle();
+  const { data: existing, error: readError } = await supabase.from("agent_work_items").select("id").eq("content_item_id", item.id).eq("lane", "monthly_content_lupe").in("status", ["draft", "in_progress", "blocked", "ready"]).maybeSingle();
   if (readError) throw readError;
   const write = existing
     ? await supabase.from("agent_work_items").update(payload).eq("id", existing.id)
@@ -190,12 +190,34 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
           await transition(supabase, item, "qa_in_progress", { actor: "OpenAI", reason: "Existing OCC draft adopted unchanged; independent Anthropic QA required.", jobId: job.id, nextAction: "Anthropic evaluates the adopted revision." });
           continue;
         }
-        const asset = await generateIndependentAsset(writer, { platform, title: item.title, research: item.research_brief || {}, editorialPackage: item.package_manifest?.editorial || {}, priorAsset: prior, rewriteGuidance: item.audit_summary || "" });
+        const { data: lupeFeedback, error: feedbackError } = await supabase.from("content_feedback")
+          .select("id,body,origin_work_item_id")
+          .eq("content_item_id", item.id)
+          .eq("required", true)
+          .eq("status", "received")
+          .not("request_revision_key", "is", null)
+          .order("created_at", { ascending: true });
+        if (feedbackError) throw feedbackError;
+        const feedbackGuidance = (lupeFeedback || []).map((feedback) => feedback.body).join("\n\n");
+        const rewriteGuidance = [item.audit_summary || "", feedbackGuidance ? `Lupe editorial review feedback:\n${feedbackGuidance}` : ""].filter(Boolean).join("\n\n");
+        const asset = await generateIndependentAsset(writer, { platform, title: item.title, research: item.research_brief || {}, editorialPackage: item.package_manifest?.editorial || {}, priorAsset: prior, rewriteGuidance });
         const revision = Number(item.audit_iteration_count || 0) + 1;
-        await supabase.from("monthly_content_revisions").upsert({ content_item_id: item.id, job_id: job.id, revision, reason: revision === 1 ? "Initial generated draft" : "Independent QA revision", prior_snapshot: prior, revised_snapshot: asset }, { onConflict: "content_item_id,revision" });
-        await supabase.from("content_items").update({ ...asset, audit_iteration_count: revision, audit_status: "pending", metadata: { ...(item.metadata || {}), automation_engine: "monthly_content_v2", shadow: options.shadow === true, publishing_enabled: false, ...(platform === "linkedin" ? { website_url: process.env.HERZEN_WEBSITE_URL || "https://herzenco.co" } : {}) } }).eq("id", item.id);
+        const { error: revisionError } = await supabase.from("monthly_content_revisions").upsert({ content_item_id: item.id, job_id: job.id, revision, reason: revision === 1 ? "Initial generated draft" : "Independent QA revision", prior_snapshot: prior, revised_snapshot: asset }, { onConflict: "content_item_id,revision" });
+        if (revisionError) throw revisionError;
+        const { error: itemError } = await supabase.from("content_items").update({ ...asset, audit_iteration_count: revision, audit_status: "pending", metadata: { ...(item.metadata || {}), automation_engine: "monthly_content_v2", shadow: options.shadow === true, publishing_enabled: false, ...(platform === "linkedin" ? { website_url: process.env.HERZEN_WEBSITE_URL || "https://herzenco.co" } : {}) } }).eq("id", item.id);
+        if (itemError) throw itemError;
+        if ((lupeFeedback || []).length) {
+          const feedbackIds = (lupeFeedback || []).map((feedback) => feedback.id);
+          const { error: appliedError } = await supabase.from("content_feedback").update({
+            status: "applied",
+            applied_at: new Date().toISOString(),
+            resolution_note: `Applied by OpenAI in Monthly Content Operations revision ${revision}.`,
+            application_evidence: { applying_agent: "OpenAI", revision, revision_job_id: job.id },
+          }).in("id", feedbackIds).eq("status", "received");
+          if (appliedError) throw appliedError;
+        }
         Object.assign(item, asset, { audit_iteration_count: revision, audit_status: "pending" });
-        await finish(supabase, job, { revision });
+        await finish(supabase, job, { revision, applied_feedback_ids: (lupeFeedback || []).map((feedback) => feedback.id) }, (lupeFeedback || []).map((feedback) => ({ feedback_id: feedback.id, origin_work_item_id: feedback.origin_work_item_id })));
         await transition(supabase, item, "qa_in_progress", { actor: "OpenAI", reason: "Draft completed; independent Anthropic QA required.", jobId: job.id, nextAction: "Anthropic evaluates the current revision." });
       } else if (stage === "qa_in_progress") {
         const result = await auditor.audit(currentAsset(item), { platform, research: item.research_brief, editorial: item.package_manifest?.editorial });
