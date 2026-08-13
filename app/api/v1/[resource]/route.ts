@@ -76,6 +76,9 @@ export async function POST(request: Request, { params }: RouteContext) {
 
   const body = await readJson(request);
   if (!body) return fail(400, "invalid_json", "Send a JSON request body.");
+  if (context.agentId && resourceName === "approvals" && body.status && body.status !== "pending") {
+    return fail(403, "human_approval_required", "Only a signed-in human operator can decide approvals.");
+  }
   let payload: Record<string, unknown> = {
     ...pickFields(body, resource.createFields),
     ...(context.user ? { created_by: context.user.id } : {}),
