@@ -62,6 +62,19 @@ test("executor separates platform generation and uses independent Anthropic QA",
   assert.match(executor, /while \(steps\+\+ < 1\)/);
 });
 
+test("existing-draft adoption is explicit, drafting-only, and preserves authored content", () => {
+  assert.match(automationRunner, /adoptExistingDraft: options\.configuration\?\.adopt_existing_draft === true/);
+  assert.match(executor, /options\.adoptExistingDraft && item\.status !== "drafting"/);
+  const draftingBranch = executor.indexOf("const prior = currentAsset(item)");
+  const adoption = executor.slice(executor.indexOf("if (options.adoptExistingDraft)", draftingBranch), executor.indexOf("const asset = await generateIndependentAsset", draftingBranch));
+  assert.match(adoption, /prior_snapshot: prior/);
+  assert.match(adoption, /revised_snapshot: prior/);
+  assert.match(adoption, /audit_iteration_count: revision, audit_status: "pending"/);
+  assert.match(adoption, /await finish\(supabase, job, \{ revision, adopted_existing_draft: true \}\)/);
+  assert.match(adoption, /await transition\(supabase, item, "qa_in_progress"/);
+  assert.doesNotMatch(adoption, /generateIndependentAsset|title:|body:|caption:|slug:|seo_title:|meta_description:|content_publish_jobs|content_delivery_jobs/);
+});
+
 test("monthly approval cannot create a publishing job", () => {
   const branch = approval.slice(approval.indexOf("Monthly Content Operations"), approval.indexOf("const [channelResult"));
   assert.match(branch, /status: "approved"/);
