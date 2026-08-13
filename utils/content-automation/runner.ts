@@ -334,7 +334,10 @@ export async function executeAutomationJob(supabase: SupabaseClient, jobType: Au
     if (jobType === "monthly_content_item") {
       const contentItemId = String(options.configuration?.content_item_id || "");
       if (!contentItemId) throw new Error("monthly_content_item requires content_item_id.");
-      output = await executeMonthlyContentItem(supabase, contentItemId, { shadow: options.configuration?.shadow === true });
+      output = await executeMonthlyContentItem(supabase, contentItemId, {
+        shadow: options.configuration?.shadow === true,
+        adoptExistingDraft: options.configuration?.adopt_existing_draft === true,
+      });
     }
     else if (jobType === "monthly_content_watchdog") output = await runMonthlyContentWatchdog(supabase, now);
     else if (jobType === "monthly_generation") output = await runMonthlyGeneration(supabase, run.id, now, options.configuration || {});

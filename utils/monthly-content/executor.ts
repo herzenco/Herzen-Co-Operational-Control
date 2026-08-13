@@ -123,9 +123,12 @@ async function ensureLupeWorkItem(supabase: SupabaseClient, item: Row, lupeId: s
   if (write.error) throw write.error;
 }
 
-export async function executeMonthlyContentItem(supabase: SupabaseClient, contentItemId: string, options: { shadow?: boolean } = {}) {
+export async function executeMonthlyContentItem(supabase: SupabaseClient, contentItemId: string, options: { shadow?: boolean; adoptExistingDraft?: boolean } = {}) {
   const { data: item, error } = await supabase.from("content_items").select("*,content_channels(platform)").eq("id", contentItemId).single();
   if (error || !item) throw error || new Error("Content item was not found.");
+  if (options.adoptExistingDraft && item.status !== "drafting") {
+    throw new Error("Existing-draft adoption requires content status drafting.");
+  }
   const identity = await agents(supabase);
   const platform = String((item.content_channels as Row)?.platform) as "website" | "linkedin";
   const writer = new OpenAIJsonModel();
@@ -169,6 +172,24 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
         await transition(supabase, item, "drafting", { actor: "OpenAI", reason: stage === "revision_required" ? "QA revision queued with prior history preserved." : "Editorial package accepted for drafting.", jobId: job.id, nextAction: "Generate the independent asset." });
       } else if (stage === "drafting") {
         const prior = currentAsset(item);
+        if (options.adoptExistingDraft) {
+          const revision = Number(item.audit_iteration_count || 0) + 1;
+          const { error: revisionError } = await supabase.from("monthly_content_revisions").upsert({
+            content_item_id: item.id,
+            job_id: job.id,
+            revision,
+            reason: "Existing OCC draft adopted for independent QA",
+            prior_snapshot: prior,
+            revised_snapshot: prior,
+          }, { onConflict: "content_item_id,revision" });
+          if (revisionError) throw revisionError;
+          const { error: itemError } = await supabase.from("content_items").update({ audit_iteration_count: revision, audit_status: "pending" }).eq("id", item.id);
+          if (itemError) throw itemError;
+          Object.assign(item, { audit_iteration_count: revision, audit_status: "pending" });
+          await finish(supabase, job, { revision, adopted_existing_draft: true });
+          await transition(supabase, item, "qa_in_progress", { actor: "OpenAI", reason: "Existing OCC draft adopted unchanged; independent Anthropic QA required.", jobId: job.id, nextAction: "Anthropic evaluates the adopted revision." });
+          continue;
+        }
         const asset = await generateIndependentAsset(writer, { platform, title: item.title, research: item.research_brief || {}, editorialPackage: item.package_manifest?.editorial || {}, priorAsset: prior, rewriteGuidance: item.audit_summary || "" });
         const revision = Number(item.audit_iteration_count || 0) + 1;
         await supabase.from("monthly_content_revisions").upsert({ content_item_id: item.id, job_id: job.id, revision, reason: revision === 1 ? "Initial generated draft" : "Independent QA revision", prior_snapshot: prior, revised_snapshot: asset }, { onConflict: "content_item_id,revision" });
