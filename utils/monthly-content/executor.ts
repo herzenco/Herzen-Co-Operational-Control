@@ -3,6 +3,7 @@ import { AnthropicAuditor } from "../content-automation/auditors";
 import { generateIndependentAsset } from "../content-automation/generation";
 import { AnthropicJsonModel, OpenAIJsonModel } from "../content-automation/models";
 import type { GeneratedAsset } from "../content-automation/types";
+import { contentItemUrl } from "../content-item-url";
 import { assertTransition, isStale, OWNER_BY_STAGE, stageIdempotencyKey, type MonthlyContentStatus } from "./lifecycle";
 
 type Row = Record<string, any>;
@@ -88,10 +89,10 @@ async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform
   let deliveryId = item.delivery_asset_id as string | undefined;
   if (!sourceId || !deliveryId) {
     const snapshot = currentAsset(item);
-    const origin = process.env.OCC_PUBLIC_URL || "https://operations.herzenco.co";
+    const itemUrl = contentItemUrl(String(item.id));
     const { data, error } = await supabase.from("content_assets").insert([
-      { content_item_id: item.id, asset_role: "source", external_url: `${origin}/api/v1/content-items/${item.id}`, file_name: `${snapshot.slug}.source.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, immutable: true } },
-      { content_item_id: item.id, asset_role: "delivery", external_url: `${origin}/api/v1/content-items/${item.id}`, file_name: `${snapshot.slug}.delivery.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, publishable: false, shadow: item.metadata?.shadow === true } },
+      { content_item_id: item.id, asset_role: "source", external_url: itemUrl, file_name: `${snapshot.slug}.source.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, immutable: true } },
+      { content_item_id: item.id, asset_role: "delivery", external_url: itemUrl, file_name: `${snapshot.slug}.delivery.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, publishable: false, shadow: item.metadata?.shadow === true } },
     ]).select("id,asset_role");
     if (error || !data) throw error || new Error("Canonical review assets could not be persisted.");
     sourceId = data.find((asset) => asset.asset_role === "source")?.id;
@@ -104,7 +105,15 @@ async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform
 }
 
 async function ensureLupeWorkItem(supabase: SupabaseClient, item: Row, lupeId: string) {
-  const reviewUrl = String(item.human_review_url || item.review_url || `${process.env.OCC_PUBLIC_URL || "https://operations.herzenco.co"}/?content_item=${item.id}`);
+  // Existing rows can contain legacy API asset URLs. Always publish the stable
+  // browser route for the content item instead of propagating those endpoints.
+  const reviewUrl = contentItemUrl(String(item.id));
+  const { error: reviewUrlError } = await supabase.from("content_items").update({
+    human_review_url: reviewUrl,
+    review_url: reviewUrl,
+  }).eq("id", item.id);
+  if (reviewUrlError) throw reviewUrlError;
+  Object.assign(item, { human_review_url: reviewUrl, review_url: reviewUrl });
   const payload = { agent_id: lupeId, work_item_type: "review", title: `Monthly content acceptance: ${item.title}`, summary: "QA passed; verify package and route to Tito.", status: "ready", content_item_id: item.id, lane: "monthly_content_lupe", attachments: [{ label: "OCC review", url: reviewUrl }] };
   const { data: existing, error: readError } = await supabase.from("agent_work_items").select("id").eq("content_item_id", item.id).eq("lane", "monthly_content_lupe").maybeSingle();
   if (readError) throw readError;
@@ -179,7 +188,7 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
           } else await transition(supabase, item, "revision_required", { actor: "Anthropic", reason: `QA gate failed (${result.seo_score}/${result.aeo_score}); revision required.`, jobId: job.id, nextAction: "OpenAI applies QA guidance.", retryCount: iteration, evidence: result.blockers });
         } else {
           await ensureReviewPackage(supabase, item, platform, identity.K2);
-          const humanUrl = `${process.env.OCC_PUBLIC_URL || "http://localhost:3000"}/?content_item=${item.id}`;
+          const humanUrl = contentItemUrl(String(item.id));
           await supabase.from("content_items").update({ human_review_url: humanUrl, review_url: humanUrl, review_ready_at: new Date().toISOString() }).eq("id", item.id);
           item.human_review_url = humanUrl;
           await transition(supabase, item, "ready_for_lupe", { actor: "Anthropic", reason: `Independent QA passed (${result.seo_score}/${result.aeo_score}).`, jobId: job.id, ownerAgentId: identity.Lupe, nextAction: "Lupe performs acceptance review.", evidence: [{ seo_score: result.seo_score, aeo_score: result.aeo_score, review_url: humanUrl }] });
