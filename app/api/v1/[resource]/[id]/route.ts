@@ -15,6 +15,17 @@ const machineWritableResources = new Set([
   "agent-work-items",
   "agent-work-dependencies",
   "content-feedback",
+  "content-research-records",
+  "approvals",
+]);
+
+const machineDeletableResources = new Set([
+  "tasks",
+  "content-items",
+  "content-assets",
+  "agent-work-items",
+  "agent-work-dependencies",
+  "content-feedback",
 ]);
 
 export async function GET(request: Request, { params }: RouteContext) {
@@ -41,7 +52,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: machineWritableResources.has(resourceName),
+    allowAgentWrite: machineDeletableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const body = await readJson(request);

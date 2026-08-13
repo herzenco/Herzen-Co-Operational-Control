@@ -14,6 +14,8 @@ const machineWritableResources = new Set([
   "agent-work-items",
   "agent-work-dependencies",
   "content-feedback",
+  "content-research-records",
+  "approvals",
 ]);
 
 export async function GET(request: Request, { params }: RouteContext) {
