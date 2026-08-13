@@ -1,5 +1,4 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { disabledAutomationResult, shouldBlockHerzenCoContentOperation } from "./retirement";
 import { buildWebsitePublicationSnapshot, type DbRecord } from "./website-publication";
 
 export type ApprovalResult =
@@ -42,11 +41,6 @@ export async function approveWebsitePublication(supabase: SupabaseClient, input:
   if (channelResult.error || !channelResult.data) throw channelResult.error || new Error("The assigned publishing channel was not found.");
   if (contentTypeResult.error) throw contentTypeResult.error;
   if (assetResult.error) throw assetResult.error;
-  const { data: property, error: propertyError } = await supabase.from("content_properties").select("slug").eq("id", item.property_id).single();
-  if (propertyError || !property) throw propertyError || new Error("The content item's property was not found.");
-  if (shouldBlockHerzenCoContentOperation(String(property.slug || ""))) {
-    return { ok: false, errors: [disabledAutomationResult("website_publication").message] };
-  }
 
   const approvedAt = new Date().toISOString();
   const reviewer = String(input.reviewerName || input.reviewerEmail || "Herzen reviewer").trim();

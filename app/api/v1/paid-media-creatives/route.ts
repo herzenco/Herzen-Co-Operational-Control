@@ -27,7 +27,7 @@ export async function POST(request: Request) {
   if (isApiError(context)) return context;
   const body = await readJson(request); if (!body) return fail(400, "invalid_json", "Send a JSON request body.");
   const errors = validateCreative(body); if (errors.length) return fail(422, "validation_failed", errors.join(" "), { errors });
-  const payload = Object.fromEntries(FIELDS.filter((key) => body[key] !== undefined).map((key) => [key, body[key]]));
+  const payload = Object.fromEntries(FIELDS.filter((key) => body[key] !== undefined && !(key === "supersedes_id" && body[key] === "")).map((key) => [key, body[key]]));
   Object.assign(payload, context.user ? { uploaded_by: context.user.id, last_changed_by: context.user.id } : { uploaded_by_agent_id: context.agentId, last_changed_by_agent_id: context.agentId });
   const { data, error } = await context.supabase.from("paid_media_creatives").insert(payload).select().single();
   if (error || !data) return fail(400, "write_failed", error?.message || "Creative could not be created.");
