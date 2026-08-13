@@ -5,6 +5,7 @@ import { generatePair, planMonthlySlate, promoteEvergreenFallback } from "./gene
 import { loadLearningContext } from "./learning-context";
 import { AnthropicJsonModel, OpenAIJsonModel } from "./models";
 import { createReviewLink } from "./review-links";
+import { contentItemUrl } from "../content-item-url";
 import { disabledAutomationResult, isLegacyContentAutomationJobType, LegacyContentAutomationDisabledError } from "./retirement";
 import { buildCanonicalPackage, readyQaChecklist } from "./packages";
 import { etDayStart, nextMonthStart } from "./schedule";
@@ -141,7 +142,10 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
     const { error: auditError } = await supabase.from("content_audits").insert({ content_item_id: item.id, iteration, provider: result.provider, seo_score: result.seo_score, aeo_score: result.aeo_score, summary: result.summary, blockers: result.blockers, rewrite_guidance: result.rewrite_guidance, raw_response: result.raw_response || {} });
     if (auditError) throw auditError;
     if (result.passed) {
-      const reviewUrl = await createReviewLink(supabase, String(item.id));
+      // Retain the active review-link record required by the package gate, but
+      // expose the stable authenticated content-item route to people.
+      await createReviewLink(supabase, String(item.id));
+      const reviewUrl = contentItemUrl(String(item.id));
       const { data: packagedItem, error: packageReadError } = await supabase.from("content_items").select("package_manifest,source_asset_id,delivery_asset_id").eq("id", item.id).single();
       if (packageReadError || !packagedItem) throw packageReadError || new Error("Canonical package manifest was not found.");
       const packageManifest = {
@@ -160,7 +164,7 @@ async function auditUntilGate(supabase: SupabaseClient, runId: string, item: DbR
     }
     await log(supabase, runId, "audit_failed", `${item.title} failed audit iteration ${iteration}.`, { content_item_id: item.id, seo_score: result.seo_score, aeo_score: result.aeo_score, blockers: result.blockers }, "warn");
     if (iteration % 5 === 0) {
-      const payload = titlesAndLinksOnly([{ title: String(item.title), review_url: `${process.env.OCC_PUBLIC_URL || "http://localhost:3000"}/content/${item.id}` }]);
+      const payload = titlesAndLinksOnly([{ title: String(item.title), review_url: contentItemUrl(String(item.id)) }]);
       await deliverWithLease(supabase, { runId, type: "lupe_check_in", items: payload.items, key: `audit-check-in:${item.id}:${iteration}` });
       await supabase.from("content_items").update({ audit_status: "check_in_required", audit_iteration_count: iteration, seo_score: result.seo_score, aeo_score: result.aeo_score, audit_summary: result.summary, audit_blockers: result.blockers }).eq("id", item.id);
       return { passed: false, iteration, check_in_required: true };

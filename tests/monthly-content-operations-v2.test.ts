@@ -2,9 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { assertTransition, isStale, stageIdempotencyKey } from "../utils/monthly-content/lifecycle";
+import { contentItemUrl } from "../utils/content-item-url";
 
 const migration = readFileSync(new URL("../supabase/migrations/20260810164541_monthly_content_operations_v2.sql", import.meta.url), "utf8");
 const executor = readFileSync(new URL("../utils/monthly-content/executor.ts", import.meta.url), "utf8");
+const automationRunner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
 const approval = readFileSync(new URL("../utils/content-automation/approve-publication.ts", import.meta.url), "utf8");
 
 test("authoritative lifecycle permits only declared forward and exception transitions", () => {
@@ -24,6 +26,19 @@ test("watchdog staleness is deterministic", () => {
   const now = new Date("2026-08-10T16:00:00Z");
   assert.equal(isStale("2026-08-10T15:45:01Z", now, 15), false);
   assert.equal(isStale("2026-08-10T15:44:59Z", now, 15), true);
+});
+
+test("automation uses the stable browser route for each content item", () => {
+  assert.equal(
+    contentItemUrl("item 1", "https://operations.herzenco.co/api/v1/content-items/legacy"),
+    "https://operations.herzenco.co/content?content_item=item+1",
+  );
+  assert.match(executor, /const reviewUrl = contentItemUrl\(String\(item\.id\)\)/);
+  assert.match(executor, /attachments: \[\{ label: "OCC review", url: reviewUrl \}\]/);
+  assert.doesNotMatch(executor, /external_url: `?\$\{origin\}\/api\/v1\/content-items/);
+  assert.match(automationRunner, /const reviewUrl = contentItemUrl\(String\(item\.id\)\)/);
+  assert.match(automationRunner, /review_url: contentItemUrl\(String\(item\.id\)\)/);
+  assert.doesNotMatch(automationRunner, /review_url: `?\$\{process\.env\.OCC_PUBLIC_URL[^\n]+\/content\//);
 });
 
 test("migration adds durable jobs, events, revisions, RLS, and disabled schedules", () => {
