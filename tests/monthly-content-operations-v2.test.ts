@@ -13,6 +13,7 @@ test("authoritative lifecycle permits only declared forward and exception transi
   assert.doesNotThrow(() => assertTransition("planned", "research_pending"));
   assert.doesNotThrow(() => assertTransition("ready_for_tito", "approved"));
   assert.doesNotThrow(() => assertTransition("qa_in_progress", "revision_required"));
+  assert.doesNotThrow(() => assertTransition("ready_for_lupe", "revision_required"));
   assert.doesNotThrow(() => assertTransition("drafting", "recovery_required"));
   assert.throws(() => assertTransition("planned", "ready_for_lupe"));
 });
