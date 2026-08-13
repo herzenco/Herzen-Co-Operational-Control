@@ -35,7 +35,8 @@ test("automation uses the stable browser route for each content item", () => {
     "https://operations.herzenco.co/content?content_item=item+1",
   );
   assert.match(executor, /const reviewUrl = contentItemUrl\(String\(item\.id\)\)/);
-  assert.match(executor, /attachments: \[\{ label: "OCC review", url: reviewUrl \}\]/);
+  assert.match(executor, /label: "OCC review"/);
+  assert.match(executor, /url: reviewUrl/);
   assert.doesNotMatch(executor, /external_url: `?\$\{origin\}\/api\/v1\/content-items/);
   assert.match(automationRunner, /const reviewUrl = contentItemUrl\(String\(item\.id\)\)/);
   assert.match(automationRunner, /review_url: contentItemUrl\(String\(item\.id\)\)/);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { AnthropicAuditor } from "../content-automation/auditors";
 import { generateIndependentAsset } from "../content-automation/generation";
@@ -71,6 +72,43 @@ function currentAsset(item: Row): GeneratedAsset {
     seo_title: item.seo_title || item.title, meta_description: item.meta_description || "", reasoning_summary: item.reasoning_summary || "" };
 }
 
+const reviewSnapshotFields = ["title", "body", "caption", "slug", "seo_title", "meta_description", "reasoning_summary"] as const;
+
+export function canonicalReviewSnapshotMatches(snapshot: unknown, current: GeneratedAsset) {
+  if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) return false;
+  const saved = snapshot as Row;
+  return reviewSnapshotFields.every((field) => (saved[field] ?? null) === (current[field] ?? null));
+}
+
+export function findRevisionReviewAssetIds(input: {
+  assets: Row[];
+  currentSourceId?: string;
+  currentDeliveryId?: string;
+  revisionId: string;
+  revisionNumber: number;
+  snapshot: GeneratedAsset;
+}) {
+  const representsRevision = (asset: Row) => {
+    const metadata = asset.metadata && typeof asset.metadata === "object" ? asset.metadata as Row : {};
+    const explicitlyLinked = metadata.monthly_content_revision_id === input.revisionId
+      && Number(metadata.monthly_content_revision) === input.revisionNumber;
+    const firstRevisionFallback = input.revisionNumber === 1
+      && (asset.id === input.currentSourceId || asset.id === input.currentDeliveryId)
+      && metadata.monthly_content_revision_id == null;
+    return (explicitlyLinked || firstRevisionFallback)
+      && canonicalReviewSnapshotMatches(metadata.canonical_snapshot, input.snapshot);
+  };
+  return {
+    sourceId: input.assets.find((asset) => asset.asset_role === "source" && representsRevision(asset))?.id as string | undefined,
+    deliveryId: input.assets.find((asset) => asset.asset_role === "delivery" && representsRevision(asset))?.id as string | undefined,
+  };
+}
+
+export function revisionReviewAssetId(contentItemId: string, revisionId: string, role: "source" | "delivery") {
+  const hex = createHash("sha256").update(`${contentItemId}:${revisionId}:${role}`, "utf8").digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-5${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
 async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform: "website" | "linkedin", k2Id: string) {
   let researchRecordId = item.research_record_id as string | undefined;
   if (!researchRecordId) {
@@ -85,22 +123,73 @@ async function ensureReviewPackage(supabase: SupabaseClient, item: Row, platform
     if (researchError || !research) throw researchError || new Error("Canonical K2 research could not be persisted.");
     researchRecordId = research.id;
   }
-  let sourceId = item.source_asset_id as string | undefined;
-  let deliveryId = item.delivery_asset_id as string | undefined;
-  if (!sourceId || !deliveryId) {
-    const snapshot = currentAsset(item);
+  const revisionNumber = Number(item.audit_iteration_count || 0);
+  const { data: revision, error: revisionError } = await supabase.from("monthly_content_revisions")
+    .select("id,revision")
+    .eq("content_item_id", item.id)
+    .eq("revision", revisionNumber)
+    .maybeSingle();
+  if (revisionError) throw revisionError;
+  if (!revision) throw new Error("The current durable revision is required before creating a review package.");
+
+  const snapshot = currentAsset(item);
+  const { data: reviewAssets, error: assetsReadError } = await supabase.from("content_assets")
+    .select("id,asset_role,is_current,metadata")
+    .eq("content_item_id", item.id)
+    .in("asset_role", ["source", "delivery"]);
+  if (assetsReadError) throw assetsReadError;
+  const revisionId = String(revision.id);
+  let { sourceId, deliveryId } = findRevisionReviewAssetIds({
+    assets: reviewAssets || [],
+    currentSourceId: item.source_asset_id,
+    currentDeliveryId: item.delivery_asset_id,
+    revisionId,
+    revisionNumber,
+    snapshot,
+  });
+
+  const missingRoles = [!sourceId ? "source" : null, !deliveryId ? "delivery" : null].filter(Boolean) as Array<"source" | "delivery">;
+  if (missingRoles.length) {
     const itemUrl = contentItemUrl(String(item.id));
-    const { data, error } = await supabase.from("content_assets").insert([
-      { content_item_id: item.id, asset_role: "source", external_url: itemUrl, file_name: `${snapshot.slug}.source.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, immutable: true } },
-      { content_item_id: item.id, asset_role: "delivery", external_url: itemUrl, file_name: `${snapshot.slug}.delivery.json`, mime_type: "application/json", metadata: { canonical_snapshot: snapshot, platform, publishable: false, shadow: item.metadata?.shadow === true } },
-    ]).select("id,asset_role");
-    if (error || !data) throw error || new Error("Canonical review assets could not be persisted.");
-    sourceId = data.find((asset) => asset.asset_role === "source")?.id;
-    deliveryId = data.find((asset) => asset.asset_role === "delivery")?.id;
+    const baseMetadata = { canonical_snapshot: snapshot, platform, monthly_content_revision_id: revisionId, monthly_content_revision: revisionNumber };
+    const newAssets = missingRoles.map((role) => ({
+      id: revisionReviewAssetId(String(item.id), revisionId, role),
+      content_item_id: item.id,
+      asset_role: role,
+      external_url: itemUrl,
+      file_name: `${snapshot.slug}.r${revisionNumber}.${role}.json`,
+      mime_type: "application/json",
+      version: revisionNumber,
+      is_current: true,
+      metadata: role === "source"
+        ? { ...baseMetadata, immutable: true }
+        : { ...baseMetadata, publishable: false, shadow: item.metadata?.shadow === true },
+    }));
+    const { error } = await supabase.from("content_assets").upsert(newAssets, { onConflict: "id", ignoreDuplicates: true });
+    if (error) throw error;
+    sourceId ||= newAssets.find((asset) => asset.asset_role === "source")?.id;
+    deliveryId ||= newAssets.find((asset) => asset.asset_role === "delivery")?.id;
   }
-  const manifest = { ...(item.package_manifest || {}), caption: item.caption || item.body, source_asset_id: sourceId, delivery_asset_id: deliveryId, publishing_enabled: false };
+  if (!sourceId || !deliveryId) throw new Error("Both revision-aware review assets are required.");
+
+  const { error: currentAssetsError } = await supabase.from("content_assets").update({ is_current: true }).in("id", [sourceId, deliveryId]);
+  if (currentAssetsError) throw currentAssetsError;
+  const manifest = {
+    ...(item.package_manifest || {}),
+    revision: revisionNumber,
+    revision_id: revisionId,
+    caption: item.caption || item.body,
+    source_asset_id: sourceId,
+    delivery_asset_id: deliveryId,
+    publishing_enabled: false,
+  };
   const { error } = await supabase.from("content_items").update({ research_record_id: researchRecordId, source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest }).eq("id", item.id);
   if (error) throw error;
+  const [historicalSources, historicalDeliveries] = await Promise.all([
+    supabase.from("content_assets").update({ is_current: false }).eq("content_item_id", item.id).eq("asset_role", "source").neq("id", sourceId),
+    supabase.from("content_assets").update({ is_current: false }).eq("content_item_id", item.id).eq("asset_role", "delivery").neq("id", deliveryId),
+  ]);
+  if (historicalSources.error || historicalDeliveries.error) throw historicalSources.error || historicalDeliveries.error;
   Object.assign(item, { research_record_id: researchRecordId, source_asset_id: sourceId, delivery_asset_id: deliveryId, package_manifest: manifest });
 }
 
@@ -114,7 +203,23 @@ async function ensureLupeWorkItem(supabase: SupabaseClient, item: Row, lupeId: s
   }).eq("id", item.id);
   if (reviewUrlError) throw reviewUrlError;
   Object.assign(item, { human_review_url: reviewUrl, review_url: reviewUrl });
-  const payload = { agent_id: lupeId, work_item_type: "review", title: `Monthly content acceptance: ${item.title}`, summary: "QA passed; verify package and route to Tito.", status: "ready", content_item_id: item.id, lane: "monthly_content_lupe", attachments: [{ label: "OCC review", url: reviewUrl }] };
+  const payload = {
+    agent_id: lupeId,
+    work_item_type: "review",
+    title: `Monthly content acceptance: ${item.title}`,
+    summary: `QA passed for revision ${item.package_manifest?.revision || item.audit_iteration_count}; verify package and route to Tito.`,
+    status: "ready",
+    content_item_id: item.id,
+    lane: "monthly_content_lupe",
+    attachments: [{
+      label: "OCC review",
+      url: reviewUrl,
+      revision: item.package_manifest?.revision || item.audit_iteration_count,
+      revision_id: item.package_manifest?.revision_id || null,
+      source_asset_id: item.source_asset_id || null,
+      delivery_asset_id: item.delivery_asset_id || null,
+    }],
+  };
   const { data: existing, error: readError } = await supabase.from("agent_work_items").select("id").eq("content_item_id", item.id).eq("lane", "monthly_content_lupe").in("status", ["draft", "in_progress", "blocked", "ready"]).maybeSingle();
   if (readError) throw readError;
   const write = existing
@@ -134,6 +239,7 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
   const writer = new OpenAIJsonModel();
   const auditor = new AnthropicAuditor(new AnthropicJsonModel());
   if (item.status === "ready_for_lupe") {
+    await ensureReviewPackage(supabase, item, platform, identity.K2);
     await ensureLupeWorkItem(supabase, item, identity.Lupe);
     return { content_item_id: item.id, status: item.status, review_url: item.human_review_url || item.review_url || null, steps: 0 };
   }
