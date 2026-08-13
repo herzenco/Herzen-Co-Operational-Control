@@ -132,7 +132,8 @@ export function TaskDetailDialog({ taskId, accessToken, agents, profiles, projec
     window.setTimeout(() => setCopyState(""), 1800);
   }
 
-  const ticketUrl = typeof window === "undefined" ? `/tasks/${taskId}` : `${window.location.origin}/tasks/${taskId}`;
+  const ticketPath = `/kanban/${encodeURIComponent(taskId)}`;
+  const ticketUrl = typeof window === "undefined" ? ticketPath : `${window.location.origin}${ticketPath}`;
   const assignee = task?.owner_agent_id ? agentMap.get(String(task.owner_agent_id)) : task?.assigned_user_id ? profileMap.get(String(task.assigned_user_id)) : null;
   const creator = task?.created_by ? profileMap.get(String(task.created_by)) || String(task.created_by) : "Machine/API or unavailable";
 
@@ -145,7 +146,7 @@ export function TaskDetailDialog({ taskId, accessToken, agents, profiles, projec
         </header>
 
         {state === "loading" && <div className="taskDetailState"><span className="taskDetailSpinner" aria-hidden="true" /><b>Loading ticket</b><p>Reading the exact ID from the authenticated OCC API.</p></div>}
-        {state !== "loading" && state !== "ready" && <div className="taskDetailState error"><b>{state === "not-found" ? "Ticket not found" : state === "unauthorized" ? "Access required" : "Could not load ticket"}</b><p>{message}</p>{state === "unauthorized" && <a className="liveBtn" href={`/login?next=${encodeURIComponent(`/tasks/${taskId}`)}`}>Sign in again</a>}</div>}
+        {state !== "loading" && state !== "ready" && <div className="taskDetailState error"><b>{state === "not-found" ? "Ticket not found" : state === "unauthorized" ? "Access required" : "Could not load ticket"}</b><p>{message}</p>{state === "unauthorized" && <a className="liveBtn" href={`/login?next=${encodeURIComponent(ticketPath)}`}>Sign in again</a>}</div>}
 
         {state === "ready" && task && <div className="taskDetailBody">
           <section className="taskDetailActions" aria-label="Ticket actions">

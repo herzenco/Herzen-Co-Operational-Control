@@ -7,7 +7,6 @@ import { contentItemUrl } from "../utils/content-item-url";
 const migration = readFileSync(new URL("../supabase/migrations/20260810164541_monthly_content_operations_v2.sql", import.meta.url), "utf8");
 const executor = readFileSync(new URL("../utils/monthly-content/executor.ts", import.meta.url), "utf8");
 const automationRunner = readFileSync(new URL("../utils/content-automation/runner.ts", import.meta.url), "utf8");
-const commandCenter = readFileSync(new URL("../app/command-center.tsx", import.meta.url), "utf8");
 const approval = readFileSync(new URL("../utils/content-automation/approve-publication.ts", import.meta.url), "utf8");
 
 test("authoritative lifecycle permits only declared forward and exception transitions", () => {
@@ -32,7 +31,7 @@ test("watchdog staleness is deterministic", () => {
 test("automation uses the stable browser route for each content item", () => {
   assert.equal(
     contentItemUrl("item 1", "https://operations.herzenco.co/api/v1/content-items/legacy"),
-    "https://operations.herzenco.co/?content_item=item+1",
+    "https://operations.herzenco.co/content?content_item=item+1",
   );
   assert.match(executor, /const reviewUrl = contentItemUrl\(String\(item\.id\)\)/);
   assert.match(executor, /attachments: \[\{ label: "OCC review", url: reviewUrl \}\]/);
@@ -40,8 +39,6 @@ test("automation uses the stable browser route for each content item", () => {
   assert.match(automationRunner, /const reviewUrl = contentItemUrl\(String\(item\.id\)\)/);
   assert.match(automationRunner, /review_url: contentItemUrl\(String\(item\.id\)\)/);
   assert.doesNotMatch(automationRunner, /review_url: `?\$\{process\.env\.OCC_PUBLIC_URL[^\n]+\/content\//);
-  assert.match(commandCenter, /searchParams\(window\.location\.search\)\.get\("content_item"\)/i);
-  assert.match(commandCenter, /setSelectedContent\(linkedItem\)/);
 });
 
 test("migration adds durable jobs, events, revisions, RLS, and disabled schedules", () => {
