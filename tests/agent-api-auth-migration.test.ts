@@ -27,8 +27,13 @@ test("machine writes are scope-limited and cannot decide human approvals", () =>
   assert.match(auth, /content:write/);
   assert.match(collection, /machineWritableResources = new Set\(\[\s*"tasks"/);
   assert.match(collection, /allowAgentWrite: machineWritableResources\.has\(resourceName\)/);
-  assert.match(item, /machineWritableResources = new Set\(\[\s*"tasks"/);
-  assert.match(item, /allowAgentWrite: machineWritableResources\.has\(resourceName\)/);
+  assert.match(collection, /machineWritableResources = new Set\(\[[\s\S]*"content-research-records",[\s\S]*"approvals"/);
+  assert.match(collection, /context\.agentId && resourceName === "approvals" && body\.status && body\.status !== "pending"/);
+  assert.match(item, /machineWritableResources = new Set\(\[[\s\S]*"content-research-records",[\s\S]*"approvals"/);
+  assert.match(item, /const machineDeletableResources = new Set\(\[[\s\S]*"content-feedback",\s*\]\)/);
+  assert.doesNotMatch(item.match(/const machineDeletableResources[\s\S]*?\n\]\);/)?.[0] || "", /"content-research-records"|"approvals"/);
+  assert.equal(item.match(/allowAgentWrite: machineWritableResources\.has\(resourceName\)/g)?.length, 1);
+  assert.equal(item.match(/allowAgentWrite: machineDeletableResources\.has\(resourceName\)/g)?.length, 1);
   assert.match(item, /human_approval_required/);
   assert.match(collection, /agent_insert/);
   assert.match(item, /agent_update/);

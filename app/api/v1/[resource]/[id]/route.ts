@@ -52,7 +52,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: machineDeletableResources.has(resourceName),
+    allowAgentWrite: machineWritableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const body = await readJson(request);
@@ -221,7 +221,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: machineWritableResources.has(resourceName),
+    allowAgentWrite: machineDeletableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const { data, error } = await context.supabase
