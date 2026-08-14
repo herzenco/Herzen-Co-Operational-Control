@@ -6,9 +6,13 @@ import { AnthropicJsonModel, OpenAIJsonModel } from "../content-automation/model
 import type { GeneratedAsset } from "../content-automation/types";
 import { contentItemUrl } from "../content-item-url";
 import { assertTransition, isStale, OWNER_BY_STAGE, stageIdempotencyKey, type MonthlyContentStatus } from "./lifecycle";
+import { requireMonthlyContentPlanningReady } from "./planning-readiness";
 
 type Row = Record<string, any>;
 const REQUEST_ID = "REQ-20260810-122829-monthly-content-ops-root-repair";
+const PLANNING_REQUIRED_STAGES = new Set<MonthlyContentStatus>([
+  "planned", "research_pending", "research_ready", "editorial_ready", "drafting", "qa_in_progress", "revision_required",
+]);
 
 async function agents(supabase: SupabaseClient) {
   const { data, error } = await supabase.from("agents").select("id,name").in("name", ["K2", "C-3PO", "Lupe"]);
@@ -233,6 +237,9 @@ export async function executeMonthlyContentItem(supabase: SupabaseClient, conten
   if (error || !item) throw error || new Error("Content item was not found.");
   if (options.adoptExistingDraft && item.status !== "drafting") {
     throw new Error("Existing-draft adoption requires content status drafting.");
+  }
+  if (PLANNING_REQUIRED_STAGES.has(item.status as MonthlyContentStatus)) {
+    await requireMonthlyContentPlanningReady(supabase, item);
   }
   const identity = await agents(supabase);
   const platform = String((item.content_channels as Row)?.platform) as "website" | "linkedin";

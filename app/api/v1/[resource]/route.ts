@@ -4,6 +4,7 @@ import { fail, ok, preflight, readJson } from "../../../../utils/api/responses";
 import { serializeApiResource } from "../../../../utils/content-assets";
 import { normalizeContentWrite } from "../../../../utils/content-write";
 import { resolveContentPropertyScope } from "../../../../utils/api/content-property-scope";
+import { MonthlyContentPlanningReadinessError, requireMonthlyContentPlanningReady } from "../../../../utils/monthly-content/planning-readiness";
 
 type RouteContext = { params: Promise<{ resource: string }> };
 
@@ -78,6 +79,34 @@ export async function POST(request: Request, { params }: RouteContext) {
   if (!body) return fail(400, "invalid_json", "Send a JSON request body.");
   if (context.agentId && resourceName === "approvals" && body.status && body.status !== "pending") {
     return fail(403, "human_approval_required", "Only a signed-in human operator can decide approvals.");
+  }
+  if (resourceName === "approvals" && body.content_item_id && (!body.status || body.status === "pending")) {
+    const { data: contentItem, error: contentItemError } = await context.supabase
+      .from("content_items")
+      .select("id,status,owner_agent_id,publish_at,monthly_ops_version")
+      .eq("id", body.content_item_id)
+      .single();
+    if (contentItemError || !contentItem) return fail(404, "content_item_not_found", "The approval content item was not found.");
+    if (contentItem.status === "ready_for_lupe" && Number(contentItem.monthly_ops_version || 0) === 2) {
+      try {
+        await requireMonthlyContentPlanningReady(context.supabase, contentItem);
+      } catch (failure) {
+        if (failure instanceof MonthlyContentPlanningReadinessError) {
+          return fail(422, failure.code, failure.message, { missing_fields: failure.missingFields });
+        }
+        throw failure;
+      }
+      const { data: existingApproval, error: existingApprovalError } = await context.supabase
+        .from("approvals")
+        .select("*")
+        .eq("content_item_id", contentItem.id)
+        .eq("status", "pending")
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (existingApprovalError) return fail(500, "database_error", existingApprovalError.message);
+      if (existingApproval) return ok(serializeApiResource(resourceName, existingApproval));
+    }
   }
   let payload: Record<string, unknown> = {
     ...pickFields(body, resource.createFields),
