@@ -5,6 +5,7 @@ import { serializeApiResource } from "../../../../../utils/content-assets";
 import { approveWebsitePublication } from "../../../../../utils/content-automation/approve-publication";
 import { createAutomationClient } from "../../../../../utils/content-automation/server";
 import { normalizeContentWrite } from "../../../../../utils/content-write";
+import { MonthlyContentPlanningReadinessError, requireMonthlyContentPlanningReady } from "../../../../../utils/monthly-content/planning-readiness";
 
 type RouteContext = { params: Promise<{ resource: string; id: string }> };
 
@@ -62,13 +63,23 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (resourceName === "content-items") {
     const { data: current, error: currentError } = await context.supabase
       .from(resource.table)
-      .select("caption,creative_asset_path,metadata,status,approval_state,channel_id")
+      .select("caption,creative_asset_path,metadata,status,approval_state,channel_id,owner_agent_id,publish_at,monthly_ops_version")
       .eq("id", id)
       .single();
     if (currentError || !current) return fail(404, "not_found", "The requested record was not found.");
     const normalized = normalizeContentWrite({ ...current, ...payload });
     if (normalized.error) return fail(422, "unhosted_creative", normalized.error);
     payload = { ...payload, caption: normalized.payload.caption };
+    if (body.status === "ready_for_tito" && Number(current.monthly_ops_version || 0) === 2) {
+      try {
+        await requireMonthlyContentPlanningReady(context.supabase, { ...current, ...payload });
+      } catch (failure) {
+        if (failure instanceof MonthlyContentPlanningReadinessError) {
+          return fail(422, failure.code, failure.message, { missing_fields: failure.missingFields });
+        }
+        throw failure;
+      }
+    }
     if (current.status === "approved" && current.approval_state === "approved" && body.publish_at && body.status !== "publishing") {
       payload.status = "scheduled";
     }
