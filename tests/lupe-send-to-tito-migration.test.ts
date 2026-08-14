@@ -45,6 +45,8 @@ test("one transaction creates approval provenance, transition, and finalizes Lup
 
 test("idempotency reuses the successful approval and conflicts on changed context", () => {
   assert.match(migration, /evidence_item ->> 'idempotency_key' = btrim\(request_key\)/);
+  assert.doesNotMatch(migration, /into existing_approval, existing_provenance/);
+  assert.match(migration, /where id = \(existing_provenance ->> 'approval_id'\)::uuid/);
   assert.match(migration, /'duplicate', true/);
   assert.match(migration, /idempotency_key_conflict/);
   assert.match(migration, /pending_tito_approval_conflict/);

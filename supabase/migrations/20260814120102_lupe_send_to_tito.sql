@@ -36,8 +36,8 @@ begin
   -- Serialize the key globally so it cannot concurrently identify two handoffs.
   perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended(btrim(request_key), 0));
 
-  select approval, evidence_item
-  into existing_approval, existing_provenance
+  select evidence_item
+  into existing_provenance
   from public.approvals approval
   cross join lateral jsonb_array_elements(
     case when jsonb_typeof(approval.evidence) = 'array' then approval.evidence else '[]'::jsonb end
@@ -48,6 +48,9 @@ begin
   limit 1;
 
   if found then
+    select * into existing_approval from public.approvals
+    where id = (existing_provenance ->> 'approval_id')::uuid;
+    if not found then raise exception 'idempotency_key_conflict'; end if;
     select * into item from public.content_items
     where id = existing_approval.content_item_id for update;
     if existing_approval.content_item_id is distinct from target_content_item_id
