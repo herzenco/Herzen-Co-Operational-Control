@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
-import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
+import { isContentReviewable, isPendingApprovalActionable, rejectionHistoryFromActivity } from "../utils/content-review";
 
 const commandCenter = readFileSync("app/command-center.tsx", "utf8");
+const reviewWorkspace = readFileSync("app/content-review-workspace.tsx", "utf8");
 const styles = readFileSync("app/globals.css", "utf8");
 const resources = readFileSync("utils/api/resources.ts", "utf8");
 const itemRoute = readFileSync("app/api/v1/[resource]/[id]/route.ts", "utf8");
@@ -40,7 +41,10 @@ test("suggested Instagram posts expose one-click caption and image tools", () =>
   assert.match(commandCenter, />Copy caption<\/button>/);
   assert.match(commandCenter, /Download image/);
   assert.match(commandCenter, /className="mobilePostTools"/);
-  assert.match(commandCenter, /className="contentPostUtilityActions"/);
+  assert.match(reviewWorkspace, />Copy caption<\/button>/);
+  assert.match(reviewWorkspace, /Download image/);
+  assert.match(commandCenter, /onCopyCaption=\{/);
+  assert.match(commandCenter, /onDownloadCreative=\{/);
   assert.match(commandCenter, /role="status" aria-live="polite"/);
   assert.match(styles, /\.mobilePostTools,\.mobileReviewActions\{display:grid/);
 });
@@ -56,13 +60,24 @@ test("rejected feedback section reads immutable approval activity", () => {
   assert.equal(isContentReviewable("drafting"), false);
 });
 
-test("desktop preview renders a post mockup with caption and decisions", () => {
-  assert.match(commandCenter, /contentPostMockup/);
-  assert.match(commandCenter, /contentPostCaption/);
-  assert.match(styles, /\.contentPostMockup/);
+test("desktop content review leaves the drawer for a dedicated workspace", () => {
+  assert.match(commandCenter, /<ContentReviewWorkspace/);
+  assert.match(commandCenter, /String\(drawer\) !== "contentPreview"/);
+  assert.doesNotMatch(commandCenter, /className="contentPostMockup/);
 });
 
 test("stable review URLs open the exact authenticated content preview", () => {
   assert.match(commandCenter, /new URLSearchParams\(window\.location\.search\)\.get\("content_item"\)/);
   assert.match(commandCenter, /setDrawer\("contentPreview"\)/);
+});
+
+test("pending approvals exclude terminal linked content and terminal updates withdraw stale approvals", () => {
+  const approval = { id: "approval-1", status: "pending", content_item_id: "content-1" };
+  assert.equal(isPendingApprovalActionable(approval, { id: "content-1", status: "ready_for_tito" }), true);
+  assert.equal(isPendingApprovalActionable(approval, { id: "content-1", status: "cancelled" }), false);
+  assert.equal(isPendingApprovalActionable(approval, { id: "content-1", status: "rejected" }), false);
+  assert.equal(isPendingApprovalActionable({ ...approval, status: "approved" }, { id: "content-1", status: "approved" }), false);
+  assert.match(itemRoute, /status: "withdrawn"/);
+  assert.match(itemRoute, /eq\("content_item_id", data\.id\)/);
+  assert.match(itemRoute, /eq\("status", "pending"\)/);
 });

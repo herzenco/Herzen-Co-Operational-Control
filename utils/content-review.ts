@@ -13,6 +13,13 @@ const REVIEWABLE_CONTENT_STATUSES = new Set([
   "ready_for_tito",
 ]);
 
+const TERMINAL_CONTENT_STATUSES = new Set([
+  "cancelled",
+  "rejected",
+  "archived",
+  "superseded",
+]);
+
 function record(value: unknown): ContentReviewActivity | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? value as ContentReviewActivity
@@ -27,6 +34,13 @@ function stringValue(value: unknown) {
 
 export function isContentReviewable(status: unknown) {
   return REVIEWABLE_CONTENT_STATUSES.has(stringValue(status));
+}
+
+export function isPendingApprovalActionable(approval: ContentReviewActivity, linkedContent?: ContentReviewActivity) {
+  if (stringValue(approval.status) !== "pending") return false;
+  if (!stringValue(approval.content_item_id)) return true;
+  if (!linkedContent) return true;
+  return !TERMINAL_CONTENT_STATUSES.has(stringValue(linkedContent.status));
 }
 
 export function rejectionHistoryFromActivity(activity: ContentReviewActivity[]) {
