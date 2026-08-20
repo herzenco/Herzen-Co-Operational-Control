@@ -257,9 +257,23 @@ approved later.
 
 ### Record publication
 
-LinkedIn publishing is manual-command, Lupe-owned work. OCC approval does not
-notify or trigger Lupe. After Herzen identifies a specific approved item, Lupe
-claims its frozen publish input:
+LinkedIn publishing is Lupe-owned work. OCC never calls LinkedIn and approval
+does not notify or trigger Lupe. OCC exposes a read-only source record, an
+expiring duplicate lock, and result bookkeeping.
+
+Read the exact approved input and current publication ledger state:
+
+```http
+GET /api/v1/content-items/<content uuid>/linkedin-publication
+Authorization: Bearer <OCC agent key>
+```
+
+`data.publish_input` includes the content ID, exact approved body, explicit
+hashtags and links, media, target LinkedIn account identity, approval record,
+content status, optional schedule, property guard, and stable idempotency key.
+`data.publication` contains any existing claim, failure, block, or posted result.
+
+Claim the frozen input immediately before Lupe calls LinkedIn:
 
 ```http
 POST /api/v1/content-items/<content uuid>/linkedin-publication
@@ -268,12 +282,14 @@ Authorization: Bearer <OCC agent key>
 
 Only an approved Herzen Co. item assigned to LinkedIn with a passing audit,
 canonical delivery asset, matching package manifest, and no unresolved required
-feedback can be claimed. A successful first claim returns `should_publish: true`
-and a `publish_input` containing the internal label, final body, media,
-property guard, approval status, optional schedule, platform, content ID, and
-stable idempotency key. A concurrent or repeated claim returns
-`should_publish: false`; if the item already shipped, its existing URL is
-returned instead of creating another post.
+feedback can be claimed. A successful first claim returns `should_publish: true`,
+`state: "claimed"`, the owner, and a 15-minute expiry.
+A same-owner retry is idempotent and returns `state: "in_progress"` with
+`should_publish: false`. Another owner receives `409 linkedin_claim_conflict`.
+If the item already shipped, OCC returns the existing URL and never creates a
+second publish command. An expired claim returns `state: "stale_claim"` and
+`should_publish: false`; OCC marks publication bookkeeping blocked until Lupe
+reconciles provider evidence, records `failed` or `blocked`, and claims again.
 
 Lupe sends `publish_input.body` as the post text and `publish_input.media` as
 attachments through Lupe's LinkedIn connection. The OCC title remains an
@@ -287,18 +303,39 @@ Content-Type: application/json
 {
   "status": "published",
   "idempotency_key": "occ:linkedin:<content uuid>",
-  "final_url": "https://www.linkedin.com/feed/update/example/",
+  "posted_url": "https://www.linkedin.com/feed/update/example/",
   "external_id": "optional provider id",
-  "published_at": "2026-08-04T13:00:00Z",
+  "posted_at": "2026-08-04T13:00:00Z",
+  "publishing_actor": "Lupe",
   "provider_response": {}
 }
 ```
 
-For a confirmed provider failure, Lupe sends `status: "failed"`, the same
-idempotency key, and a clear `failure_message`. Only a recorded failure may be
-claimed again. If the provider outcome is uncertain, Lupe must leave the claim
-in progress and reconcile it instead of retrying, which prevents duplicate
-posts. Website publishing remains OCC-managed. Instagram remains manual.
+Record a failure or block at any stage, even if the claim was never acquired.
+The idempotency key is optional for this request because OCC can derive it from
+the content ID:
+
+```http
+PATCH /api/v1/content-items/<content uuid>/linkedin-publication
+Authorization: Bearer <OCC agent key>
+Content-Type: application/json
+
+{
+  "status": "failed",
+  "failed_step": "claim",
+  "failure_message": "The OCC claim could not be acquired.",
+  "failed_at": "2026-08-04T12:58:00Z",
+  "provider_response": {}
+}
+```
+
+Use `status: "blocked"` when an external prerequisite requires intervention.
+Failure recording never weakens content, channel, QA, or approval gates and
+never changes `content_items.status`; it updates the separate publication state
+and appends an audit event. A competing claimant's failure is recorded without
+releasing the valid owner's lock. If the LinkedIn outcome is uncertain, do not
+retry: leave the claim in progress and reconcile provider evidence first.
+Website publishing remains OCC-managed. Instagram remains manual.
 
 ```http
 PATCH /api/v1/content-items/<content uuid>

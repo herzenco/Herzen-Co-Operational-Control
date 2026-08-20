@@ -14,15 +14,24 @@ export type LinkedInMedia = {
 };
 
 export type LinkedInPublicationPayload = {
-  schema_version: 1;
+  schema_version: 2;
   content_id: string;
   idempotency_key: string;
   approved_content_hash: string;
   internal_label: string;
   body: string;
+  hashtags: string[];
+  links: string[];
   media: LinkedInMedia[];
   property: { id: string; name: string; slug: string };
+  target: {
+    channel_id: string;
+    account_name: string;
+    account_identifier: string | null;
+  };
+  approval: { id: string; status: "approved"; approved_at: string };
   approval_status: "approved";
+  content_status: string;
   scheduled_at: string | null;
   platform: "linkedin";
   source: { system: "OCC"; package_manifest_version: number | null };
@@ -38,6 +47,21 @@ function record(value: unknown): DbRecord {
 
 function requiredString(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.map(requiredString).filter(Boolean)
+    : [];
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function linksFromBody(body: string): string[] {
+  return (body.match(/https?:\/\/[^\s<>{}\[\]"]+/g) || [])
+    .map((url) => url.replace(/[),.;!?]+$/, ""));
 }
 
 function mediaFromAssets(assets: DbRecord[], metadata: DbRecord): LinkedInMedia[] {
@@ -86,6 +110,15 @@ export function buildLinkedInPublicationSnapshot(input: {
   const body = requiredString(deliverySnapshot.caption)
     || requiredString(deliverySnapshot.body)
     || requiredString(manifest.caption);
+  const hashtags = unique([
+    ...stringArray(manifest.hashtags),
+    ...stringArray(item.hashtags),
+  ]);
+  const links = unique([
+    ...stringArray(manifest.links),
+    ...linksFromBody(body),
+  ]);
+  const approvedAt = requiredString(item.review_approved_at) || requiredString(item.approved_at);
   const errors: string[] = [];
 
   // Tomorrow's manual publishing scope is the Herzen Co. LinkedIn property. It
@@ -112,27 +145,43 @@ export function buildLinkedInPublicationSnapshot(input: {
   const stableContent = {
     content_id: requiredString(item.id),
     body,
+    hashtags,
+    links,
     media: mediaFromAssets(input.assets || [], metadata),
     property_id: requiredString(property.id),
+    target: {
+      channel_id: requiredString(channel.id),
+      account_name: requiredString(channel.account_name),
+      account_identifier: requiredString(channel.account_identifier) || null,
+    },
     scheduled_at: requiredString(item.publish_at) || null,
   };
   const hash = approvedContentHash(stableContent);
   return {
     ok: true,
     payload: {
-      schema_version: 1,
+      schema_version: 2,
       content_id: stableContent.content_id,
       idempotency_key: `occ:linkedin:${stableContent.content_id}`,
       approved_content_hash: hash,
       internal_label: requiredString(deliverySnapshot.title) || requiredString(item.title),
       body,
+      hashtags: stableContent.hashtags,
+      links: stableContent.links,
       media: stableContent.media,
       property: {
         id: requiredString(property.id),
         name: requiredString(property.name),
         slug: requiredString(property.slug),
       },
+      target: stableContent.target,
+      approval: {
+        id: requiredString(item.approval_id),
+        status: "approved",
+        approved_at: approvedAt,
+      },
       approval_status: "approved",
+      content_status: requiredString(item.status),
       scheduled_at: stableContent.scheduled_at,
       platform: "linkedin",
       source: {
