@@ -42,9 +42,18 @@ test("approval freezes the immutable delivery snapshot instead of the mutable co
   if (!result.ok) return;
   assert.equal(result.payload.title, "Approved title");
   assert.equal(result.payload.body, "Approved final body");
+  assert.equal(result.payload.body_format, "plain_text");
   assert.equal(result.payload.destination, "resource_library");
   assert.equal(result.payload.canonical_path, "/resources/approved-title/");
   assert.equal(result.payload.approved_content_hash.length, 64);
+});
+
+test("website snapshots explicitly label HTML bodies for the publishing destination", () => {
+  const htmlAssets = [{ ...assets[0], metadata: { canonical_snapshot: { ...assets[0].metadata.canonical_snapshot, body: "<p>Approved final body</p>" } } }];
+  const result = buildWebsitePublicationSnapshot({ item: approvedItem, channel: websiteChannel, assets: htmlAssets, reviewer: "Tito", approvedAt: "2026-08-04T01:00:00.000Z" });
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.payload.body_format, "html");
 });
 
 test("an unselected or unsupported website destination blocks approval", () => {

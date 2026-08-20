@@ -9,6 +9,7 @@ export type WebsitePublicationPayload = {
   approved_content_hash: string;
   title: string;
   body: string;
+  body_format: "html" | "plain_text";
   content_type: "article" | "newsletter" | "social_post";
   destination: string;
   slug: string;
@@ -116,6 +117,7 @@ export function buildWebsitePublicationSnapshot(input: {
   const templates = record(channelConfiguration.canonical_path_templates);
   const title = requiredString(final.title);
   const body = requiredString(final.body);
+  const bodyFormat: WebsitePublicationPayload["body_format"] = /<\/?[a-z][\s\S]*>/i.test(body) ? "html" : "plain_text";
   const slug = requiredString(final.slug);
   const canonicalPath = requiredString(metadata.canonical_path)
     || requiredString(final.canonical_path)
@@ -153,6 +155,7 @@ export function buildWebsitePublicationSnapshot(input: {
   const content = {
     title,
     body,
+    body_format: bodyFormat,
     content_type: contentType,
     destination,
     slug,

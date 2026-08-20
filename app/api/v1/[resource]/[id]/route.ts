@@ -148,6 +148,19 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     .single();
   if (error || !data) return fail(400, "write_failed", error?.message || "The record could not be updated.");
 
+  if (resourceName === "content-items" && ["cancelled", "rejected", "archived", "superseded"].includes(String(data.status))) {
+    const { error: approvalWithdrawalError } = await context.supabase
+      .from("approvals")
+      .update({
+        status: "withdrawn",
+        decision_note: `Automatically withdrawn because the linked content item is ${String(data.status)}.`,
+        decided_at: new Date().toISOString(),
+      })
+      .eq("content_item_id", data.id)
+      .eq("status", "pending");
+    if (approvalWithdrawalError) return fail(409, "approval_sync_failed", approvalWithdrawalError.message);
+  }
+
   if (resourceName === "content-items" && data.approval_state === "approved") {
     if (body.status === "publishing") {
       const { error: queueError } = await createAutomationClient().from("content_publish_jobs").update({ status: "queued", scheduled_for: new Date().toISOString(), next_attempt_at: null, retryable: true }).eq("content_item_id", data.id).eq("platform", "website");

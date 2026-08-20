@@ -15,8 +15,10 @@ import {
   StatusPill,
 } from "./ui/command-center-primitives";
 import { CONTENT_CREATIVE_BUCKET, contentCreativeDownloadName, contentCreativeExternalUrl, contentCreativePath } from "../utils/content-assets";
-import { isContentReviewable, rejectionHistoryFromActivity } from "../utils/content-review";
+import { isContentReviewable, isPendingApprovalActionable, rejectionHistoryFromActivity } from "../utils/content-review";
 import { TaskDetailDialog } from "./task-detail-dialog";
+import { ContentReviewWorkspace } from "./content-review-workspace";
+import type { StoredContentReview } from "../utils/content-review-workspace";
 
 export type View = "command" | "kanban" | "list" | "worklogs" | "content" | "creative" | "agentops" | "leads" | "approvals" | "workflows";
 type RecordValue = Record<string, unknown>;
@@ -186,6 +188,18 @@ function statusLabel(status: string) {
   return status.replaceAll("_", " ");
 }
 
+function objectValue(value: unknown): RecordValue {
+  return typeof value === "object" && value !== null && !Array.isArray(value) ? value as RecordValue : {};
+}
+
+function contentReviewDecisionState(item: RecordValue, approval: RecordValue | null): "approved" | "denied" | null {
+  const approvalStatus = text(approval?.status, "");
+  const itemApprovalState = text(item.approval_state, "");
+  if (approvalStatus === "approved" || itemApprovalState === "approved") return "approved";
+  if (approvalStatus === "declined" || itemApprovalState === "declined" || ["cancelled", "rejected"].includes(text(item.status))) return "denied";
+  return null;
+}
+
 function copyTextFallback(value: string) {
   const field = document.createElement("textarea");
   field.value = value;
@@ -256,15 +270,16 @@ export function CommandCenter() {
   const [opsAgent, setOpsAgent] = useState("all");
   const [opsProperty, setOpsProperty] = useState("all");
   const [opsPlatform, setOpsPlatform] = useState("all");
-  const [opsStatus, setOpsStatus] = useState("all");
+  const [opsStatus, setOpsStatus] = useState("active");
   const [opsSignal, setOpsSignal] = useState("all");
   const [opsPublishDate, setOpsPublishDate] = useState("");
   const [todayLabel, setTodayLabel] = useState("Today");
-  const [drawer, setDrawer] = useState<"task" | "dueDate" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | null>(null);
+  const [drawer, setDrawer] = useState<"task" | "dueDate" | "brief" | "agent" | "agentForm" | "workLog" | "dailyUpdate" | "lead" | "content" | "contentPreview" | "approval" | null>(null);
   const [commandReview, setCommandReview] = useState<CommandReview | null>(null);
   const [selectedReviewItem, setSelectedReviewItem] = useState<CommandReviewItem | null>(null);
   const [selectedAgent, setSelectedAgent] = useState<RecordValue | null>(null);
   const [selectedContent, setSelectedContent] = useState<RecordValue | null>(null);
+  const [selectedApproval, setSelectedApproval] = useState<RecordValue | null>(null);
   const [form, setForm] = useState<TaskForm>(EMPTY_FORM);
   const [contentForm, setContentForm] = useState<ContentForm>(EMPTY_CONTENT_FORM);
   const [agentForm, setAgentForm] = useState<AgentForm>(EMPTY_AGENT_FORM);
@@ -368,10 +383,11 @@ export function CommandCenter() {
     const timer = window.setTimeout(() => {
       if (pathname !== "/content") router.replace(`/content?content_item=${encodeURIComponent(contentItemId)}`);
       setSelectedContent(linkedItem);
+      setSelectedApproval(approvals.find((approval) => String(approval.id) === String(linkedItem.approval_id) || String(approval.content_item_id) === contentItemId) || null);
       setDrawer("contentPreview");
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [contentItems, pathname, router]);
+  }, [approvals, contentItems, pathname, router]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -677,6 +693,29 @@ export function CommandCenter() {
     }
   }
 
+  function openApproval(approval: RecordValue) {
+    setSelectedApproval(approval);
+    const linkedContent = contentItems.find((item) => String(item.id) === String(approval.content_item_id));
+    if (linkedContent) {
+      setSelectedContent(linkedContent);
+      setDrawer("contentPreview");
+      return;
+    }
+    setDrawer("approval");
+  }
+
+  async function deleteApproval(approval: RecordValue) {
+    try {
+      setError("");
+      await request(`/api/v1/approvals/${approval.id}`, { method: "DELETE" });
+      setSelectedApproval(null);
+      setDrawer(null);
+      if (session) await refreshAll(session.access_token);
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : "Could not delete the approval package.");
+    }
+  }
+
   const agents = useMemo(() => [...(overview?.agents || [])].sort((left, right) => {
     const leftIsLupe = text(left.name || left.code).toLowerCase() === "lupe";
     const rightIsLupe = text(right.name || right.code).toLowerCase() === "lupe";
@@ -746,7 +785,13 @@ export function CommandCenter() {
     });
   }, [agentMap, listSort, profileMap, projectMap, visibleTasks]);
 
-  const pendingApprovals = approvals.filter((approval) => text(approval.status, "pending") === "pending");
+  const pendingApprovals = useMemo(() => {
+    const contentById = new Map(contentItems.map((item) => [String(item.id), item]));
+    return approvals.filter((approval) => isPendingApprovalActionable(
+      approval,
+      contentById.get(String(approval.content_item_id)),
+    ));
+  }, [approvals, contentItems]);
   const dueToday = tasks.filter((task) => {
     if (!task.due_at || taskStatus(task) === "done") return false;
     return new Date(String(task.due_at)).toDateString() === new Date().toDateString();
@@ -900,7 +945,19 @@ export function CommandCenter() {
 
   function previewContent(item: RecordValue) {
     setSelectedContent(item);
+    setSelectedApproval(approvals.find((approval) => String(approval.id) === String(item.approval_id) || String(approval.content_item_id) === String(item.id)) || null);
     setDrawer("contentPreview");
+  }
+
+  function closeContentReview() {
+    setDrawer(null);
+    setSelectedContent(null);
+    setSelectedApproval(null);
+    const parameters = new URLSearchParams(window.location.search);
+    if (parameters.has("content_item")) {
+      parameters.delete("content_item");
+      router.replace(`${pathname}${parameters.size ? `?${parameters.toString()}` : ""}`);
+    }
   }
 
   function openContentRejection(item: RecordValue) {
@@ -910,7 +967,7 @@ export function CommandCenter() {
   }
 
   async function ensureContentApproval(item: RecordValue) {
-    const existing = approvals.find((approval) => String(approval.id) === String(item.approval_id));
+    const existing = approvals.find((approval) => String(approval.id) === String(item.approval_id) || String(approval.content_item_id) === String(item.id));
     if (existing) return existing;
     if (!lupe) throw new Error("Lupe must exist in the agent roster before content can be reviewed.");
     const approvalPayload = await request("/api/v1/approvals", {
@@ -932,6 +989,61 @@ export function CommandCenter() {
       body: JSON.stringify({ approval_id: approvalPayload.data.id, status: "ready_for_tito" }),
     });
     return approvalPayload.data as RecordValue;
+  }
+
+  async function persistContentReview(item: RecordValue, fields: { title: string; body: string; caption: string }, review: StoredContentReview) {
+    const response = await request(`/api/v1/content-items/${item.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({
+        title: fields.title,
+        body: fields.body || null,
+        caption: fields.caption || null,
+        metadata: { ...objectValue(item.metadata), content_review: review },
+      }),
+    });
+    const updated = response.data as RecordValue;
+    setSelectedContent(updated);
+    setContentItems((current) => current.map((entry) => String(entry.id) === String(updated.id) ? updated : entry));
+  }
+
+  async function decideContentReview(item: RecordValue, decision: "approved" | "denied" | null) {
+    try {
+      setError("");
+      setReviewSaving(true);
+      const approval = await ensureContentApproval(item);
+      const approvalResponse = await request(`/api/v1/approvals/${approval.id}`, {
+        method: "PATCH",
+        body: JSON.stringify(decision ? {
+          status: decision === "approved" ? "approved" : "declined",
+          decision_note: decision === "denied" ? "Denied during content review." : null,
+          decided_at: new Date().toISOString(),
+        } : {
+          status: "pending",
+          decision_note: null,
+          decided_at: null,
+          decided_by: null,
+        }),
+      });
+      if (!decision) {
+        await request(`/api/v1/content-items/${item.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ status: "ready_for_tito", approval_state: "pending" }),
+        });
+      }
+      const itemResponse = await request(`/api/v1/content-items/${item.id}`);
+      const updatedItem = itemResponse.data as RecordValue;
+      const updatedApproval = approvalResponse.data as RecordValue;
+      setSelectedContent(updatedItem);
+      setSelectedApproval(updatedApproval);
+      setContentItems((current) => current.map((entry) => String(entry.id) === String(updatedItem.id) ? updatedItem : entry));
+      setApprovals((current) => current.map((entry) => String(entry.id) === String(updatedApproval.id) ? updatedApproval : entry));
+    } catch (decisionError) {
+      const message = decisionError instanceof Error ? decisionError.message : "Could not record the content decision.";
+      setError(message);
+      throw new Error(message);
+    } finally {
+      setReviewSaving(false);
+    }
   }
 
   async function reviewContent(item: RecordValue, decision: "approved" | "changes_requested", note = "") {
@@ -1061,19 +1173,6 @@ export function CommandCenter() {
       if (session) await refreshAll(session.access_token);
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save the content item.");
-    }
-  }
-
-  async function advanceContent(item: RecordValue, nextStatus: string) {
-    try {
-      setError("");
-      await request(`/api/v1/content-items/${item.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ status: nextStatus }),
-      });
-      if (session) await refreshAll(session.access_token);
-    } catch (advanceError) {
-      setError(advanceError instanceof Error ? advanceError.message : "Could not advance the content item.");
     }
   }
 
@@ -1363,7 +1462,7 @@ export function CommandCenter() {
       return (opsAgent === "all" || String(item.owner_agent_id) === opsAgent)
         && (opsProperty === "all" || String(item.property_id) === opsProperty)
         && (opsPlatform === "all" || String(queue?.platform) === opsPlatform)
-        && (opsStatus === "all" || String(item.status) === opsStatus)
+        && (opsStatus === "all" || (opsStatus === "active" ? !["cancelled", "rejected", "published", "completed", "archived", "superseded"].includes(text(item.status)) : String(item.status) === opsStatus))
         && (!opsPublishDate || String(item.publish_at || "").slice(0, 10) === opsPublishDate)
         && (opsSignal === "all"
           || (opsSignal === "blocked" && agentWorkItems.some((work) => String(work.content_item_id) === String(item.id) && blockedWork.has(String(work.id))))
@@ -1371,32 +1470,49 @@ export function CommandCenter() {
           || (opsSignal === "ready" && queue?.ready_to_deliver === true));
     }).sort((a, b) => String(a.publish_at || "9999").localeCompare(String(b.publish_at || "9999")));
 
+    const unresolvedFeedback = contentFeedback.filter((entry) => entry.required === true && ["received", "blocked"].includes(text(entry.status)));
+    const readyCount = filtered.filter((item) => queueById.get(String(item.id))?.ready_to_deliver === true).length;
+    const blockedCount = filtered.filter((item) => agentWorkItems.some((work) => String(work.content_item_id) === String(item.id) && blockedWork.has(String(work.id)))).length;
+    const activeFilters = [opsAgent, opsProperty, opsPlatform, opsSignal].filter((value) => value !== "all").length + (opsStatus !== "active" ? 1 : 0) + (opsPublishDate ? 1 : 0);
+
     return <div className="agentOpsDeck">
+      <section className="opsHero">
+        <div><LiveLabel>Agent operations</LiveLabel><h2>Handoffs that need attention.</h2><p>Follow each content package from research through delivery. Resolve the gate, open the artifact, or download the final package.</p></div>
+        <div className="opsHeroState"><span>Showing</span><b>{filtered.length}</b><small>of {contentItems.length} packages</small></div>
+      </section>
+      <MetricDeck className="opsMetrics" items={[
+        { label: "Ready to deliver", value: String(readyCount).padStart(2, "0"), note: "Final package is available" },
+        { label: "Dependency blocked", value: String(blockedCount).padStart(2, "0"), note: "A required upstream handoff is open" },
+        { label: "Feedback open", value: String(unresolvedFeedback.length).padStart(2, "0"), note: "Required revisions remain unresolved" },
+        { label: "Artifacts", value: String(agentWorkItems.length).padStart(2, "0"), note: "Work records across agent lanes" },
+      ]} />
       <section className="deckPanel opsControlPanel">
-        <PanelHeader eyebrow="Canonical social operations" title="Agent handoffs and delivery queue" meta={<>{agentWorkItems.length} artifacts · {contentFeedback.filter((item) => item.required === true && ["received", "blocked"].includes(text(item.status))).length} unresolved feedback</>} />
+        <header className="opsFilterHeader"><div><span>Queue controls</span><b>Find the package that needs action</b></div>{activeFilters > 0 && <button className="ghostBtn" onClick={() => { setOpsAgent("all"); setOpsProperty("all"); setOpsPlatform("all"); setOpsStatus("active"); setOpsSignal("all"); setOpsPublishDate(""); }}>Clear {activeFilters} filter{activeFilters === 1 ? "" : "s"}</button>}</header>
         <div className="opsViewFilters">
           <label>Agent<select value={opsAgent} onChange={(event) => setOpsAgent(event.target.value)}><option value="all">All agents</option>{agents.map((agent) => <option key={String(agent.id)} value={String(agent.id)}>{text(agent.name || agent.code)}</option>)}</select></label>
           <label>Brand<select value={opsProperty} onChange={(event) => setOpsProperty(event.target.value)}><option value="all">All brands</option>{contentProperties.map((property) => <option key={String(property.id)} value={String(property.id)}>{text(property.name)}</option>)}</select></label>
           <label>Platform<select value={opsPlatform} onChange={(event) => setOpsPlatform(event.target.value)}><option value="all">All platforms</option>{[...new Set(socialQueue.map((item) => text(item.platform)).filter((item) => item !== "—"))].map((platform) => <option key={platform}>{platform}</option>)}</select></label>
-          <label>Status<select value={opsStatus} onChange={(event) => setOpsStatus(event.target.value)}><option value="all">All statuses</option>{Object.keys(CONTENT_STATUS_LABELS).map((status) => <option key={status} value={status}>{CONTENT_STATUS_LABELS[status]}</option>)}</select></label>
-          <label>Signal<select value={opsSignal} onChange={(event) => setOpsSignal(event.target.value)}><option value="all">All records</option><option value="blocked">Dependency blocked</option><option value="feedback">Feedback unresolved</option><option value="ready">Ready to deliver</option></select></label>
+          <label>Status<select value={opsStatus} onChange={(event) => setOpsStatus(event.target.value)}><option value="active">Active work</option><option value="all">All statuses</option>{Object.keys(CONTENT_STATUS_LABELS).map((status) => <option key={status} value={status}>{CONTENT_STATUS_LABELS[status]}</option>)}</select></label>
+          <label>Signal<select value={opsSignal} onChange={(event) => setOpsSignal(event.target.value)}><option value="all">All signals</option><option value="blocked">Dependency blocked</option><option value="feedback">Feedback unresolved</option><option value="ready">Ready to deliver</option></select></label>
           <label>Publish date<input type="date" value={opsPublishDate} onChange={(event) => setOpsPublishDate(event.target.value)} /></label>
         </div>
       </section>
-      <section className="opsPackageGrid">
+      <section className="opsQueue" aria-label="Agent handoff queue">
+        <header className="opsQueueHead"><span>Package</span><span>Handoff path</span><span>Next action</span></header>
         {filtered.map((item) => {
           const queue = queueById.get(String(item.id));
           const work = agentWorkItems.filter((artifact) => String(artifact.content_item_id) === String(item.id) || String(artifact.campaign_id) === String(item.id));
           const feedback = contentFeedback.filter((entry) => String(entry.content_item_id) === String(item.id));
           const dependencyBlocked = work.some((artifact) => blockedWork.has(String(artifact.id)));
-          return <article className="deckPanel opsPackageCard" key={String(item.id)}>
-            <header><div><span>{propertyById.get(String(item.property_id)) || "Unknown brand"} · {text(queue?.platform)}</span><h3>{text(item.title)}</h3></div><b className={queue?.ready_to_deliver === true ? "readySignal" : "blockedSignal"}>{queue?.ready_to_deliver === true ? "Ready" : "Gated"}</b></header>
-            <p>{dateLabel(item.publish_at)} · {CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))} · {agentById.get(String(item.owner_agent_id)) || "Unassigned"}</p>
-            <div className="handoffChain">{work.length ? work.map((artifact, index) => <a href={`/work-items/${encodeURIComponent(String(artifact.id))}`} key={String(artifact.id)} className={blockedWork.has(String(artifact.id)) ? "blocked" : ""}>{index > 0 && <i>→</i>}<b>{agentById.get(String(artifact.agent_id)) || "Agent"}</b><small>{text(artifact.work_item_type)} · {text(artifact.status)}</small></a>) : <em>No agent artifacts linked</em>}</div>
-            <footer><span>{dependencyBlocked ? "Dependency blocked" : feedback.some((entry) => entry.required === true && ["received", "blocked"].includes(text(entry.status))) ? "Required feedback unresolved" : `${work.length} linked artifacts`}</span><button className="outlineBtn" disabled={queue?.ready_to_deliver !== true} onClick={() => void downloadDeliverable(item)}>Download final package</button></footer>
+          const feedbackBlocked = feedback.some((entry) => entry.required === true && ["received", "blocked"].includes(text(entry.status)));
+          const nextAction = queue?.ready_to_deliver === true ? "Final package ready" : dependencyBlocked ? "Resolve upstream dependency" : feedbackBlocked ? "Apply required feedback" : text(item.next_action, "Complete the next handoff");
+          return <article className="opsPackageCard" key={String(item.id)}>
+            <div className="opsPackageIdentity"><header><span>{propertyById.get(String(item.property_id)) || "Unknown brand"} · {text(queue?.platform)}</span><b className={queue?.ready_to_deliver === true ? "readySignal" : "blockedSignal"}>{queue?.ready_to_deliver === true ? "Ready" : "Gated"}</b></header><h3>{text(item.title)}</h3><p><time>{dateLabel(item.publish_at)}</time><span>{CONTENT_STATUS_LABELS[text(item.status)] || statusLabel(text(item.status))}</span><span>{agentById.get(String(item.owner_agent_id)) || "Unassigned"}</span></p></div>
+            <div className="handoffChain">{work.length ? work.map((artifact, index) => <a href={`/work-items/${encodeURIComponent(String(artifact.id))}`} key={String(artifact.id)} className={blockedWork.has(String(artifact.id)) ? "blocked" : ""}>{index > 0 && <i aria-hidden="true">→</i>}<b>{agentById.get(String(artifact.agent_id)) || "Agent"}</b><small>{statusLabel(text(artifact.work_item_type))}</small><em>{statusLabel(text(artifact.status))}</em></a>) : <span className="opsNoArtifacts">No artifacts linked</span>}</div>
+            <div className="opsNextAction"><span>{dependencyBlocked ? "Blocked" : feedbackBlocked ? "Feedback" : queue?.ready_to_deliver === true ? "Delivery" : "Next"}</span><b>{nextAction}</b><small>{work.length} linked artifact{work.length === 1 ? "" : "s"}</small><button className="outlineBtn" disabled={queue?.ready_to_deliver !== true} onClick={() => void downloadDeliverable(item)}>{queue?.ready_to_deliver === true ? "Download final package" : "Package gated"}</button></div>
           </article>;
         })}
-        {!filtered.length && <p className="opsEmpty">No packages match this operations view.</p>}
+        {!filtered.length && <p className="opsEmpty">No packages match these queue filters.</p>}
       </section>
     </div>;
   }
@@ -1604,21 +1720,20 @@ export function CommandCenter() {
   function renderApprovals() {
     return (
       <div className="approvalDeck">
-        {approvals.map((approval) => {
-          const decided = text(approval.status, "pending") !== "pending";
-          return (
-            <article className={`deckPanel approvalCard ${decided ? "decided" : ""}`} key={String(approval.id)}>
-              <header><div><span>{text(approval.status, "pending")}</span><h2>{text(approval.title, "Untitled decision")}</h2></div><b>{dateLabel(approval.due_at)}</b></header>
+        {pendingApprovals.map((approval) => (
+            <article className="deckPanel approvalCard" key={String(approval.id)}>
+              <button className="approvalOpen" onClick={() => openApproval(approval)} aria-label={`Open ${text(approval.title, "approval package")}`}>
+                <div><span>{text(approval.status, "pending")}</span><h2>{text(approval.title, "Untitled decision")}</h2><small>Open full review →</small></div><b>{dateLabel(approval.due_at)}</b>
+              </button>
               <div className="approvalBody">
                 <div><span>Summary</span><p>{text(approval.summary, "No summary documented.")}</p></div>
                 <div><span>Recommendation</span><p>{text(approval.recommendation, "No recommendation documented.")}</p></div>
                 <div><span>Risk</span><p>{text(approval.risk, "No risk documented.")}</p></div>
               </div>
-              {!decided && <footer><button className="liveBtn" onClick={() => void decide(approval, "approved")}>Approve</button><button className="outlineBtn" onClick={() => void decide(approval, "changes_requested")}>Request changes</button><button className="ghostBtn" onClick={() => void decide(approval, "declined")}>Decline</button></footer>}
+              <footer><button className="liveBtn" onClick={() => void decide(approval, "approved")}>Approve</button><button className="outlineBtn" onClick={() => void decide(approval, "changes_requested")}>Request changes</button><button className="ghostBtn" onClick={() => void decide(approval, "declined")}>Decline</button></footer>
             </article>
-          );
-        })}
-        {!approvals.length && <section className="deckPanel opsEmpty">No approval packages have been submitted.</section>}
+        ))}
+        {!pendingApprovals.length && <section className="deckPanel opsEmpty">No approval packages are awaiting a decision.</section>}
       </div>
     );
   }
@@ -1753,7 +1868,30 @@ export function CommandCenter() {
 
       {selectedTaskId && session?.access_token && <TaskDetailDialog key={selectedTaskId} taskId={selectedTaskId} accessToken={session.access_token} agents={agents} profiles={profiles} projects={projects} onClose={closeTaskDetail} />}
 
-      {drawer && (
+      {drawer === "contentPreview" && selectedContent && <ContentReviewWorkspace
+        key={String(selectedContent.id)}
+        item={selectedContent}
+        authorName={overview?.viewer.display_name || session?.user.email || "Reviewer"}
+        ownerName={contentOwnerDisplay(selectedContent)}
+        propertyName={contentPropertyName(selectedContent)}
+        platformName={contentPlatformForItem(selectedContent)}
+        typeName={contentTypeName(selectedContent)}
+        statusName={CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}
+        publishLabel={selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Publication date not set"}
+        creativeUrl={contentPictureUrl(selectedContent)}
+        decision={contentReviewDecisionState(selectedContent, selectedApproval)}
+        decisionSaving={reviewSaving}
+        downloadingCreative={downloadingContentId === String(selectedContent.id)}
+        utilityStatus={contentUtilityStatus?.contentId === String(selectedContent.id) ? { kind: contentUtilityStatus.kind, message: contentUtilityStatus.message } : null}
+        onClose={closeContentReview}
+        onOpenEditor={() => openContent(selectedContent)}
+        onCopyCaption={text(selectedContent.caption, "").trim() ? () => copyContentCaption(selectedContent) : undefined}
+        onDownloadCreative={contentPictureDownloadUrl(selectedContent) ? () => downloadContentPicture(selectedContent) : undefined}
+        onDecision={(decision) => decideContentReview(selectedContent, decision)}
+        onPersist={(fields, review) => persistContentReview(selectedContent, fields, review)}
+      />}
+
+      {drawer && String(drawer) !== "contentPreview" && (
         <div className="drawerShade" onMouseDown={(event) => { if (event.target === event.currentTarget) setDrawer(null); }}>
           <aside className="deckDrawer">
             <button className="drawerClose" onClick={() => setDrawer(null)}>Close</button>
@@ -1779,51 +1917,24 @@ export function CommandCenter() {
                 <button className="liveBtn full" type="submit">Assign due date</button>
               </form>
             )}
-            {drawer === "contentPreview" && selectedContent && (
-              <div className="contentPreviewDrawer">
-                <LiveLabel>Content preview</LiveLabel>
-                <h2>{text(selectedContent.title)}</h2>
-                <div className="contentPreviewMeta">
-                  <span>{contentPropertyName(selectedContent)}</span><span>{contentPlatformForItem(selectedContent)}</span><span>{contentTypeName(selectedContent)}</span><span>{CONTENT_STATUS_LABELS[text(selectedContent.status)] || statusLabel(text(selectedContent.status))}</span>
-                </div>
-                {!['approved', 'scheduled', 'published', 'completed', 'cancelled', 'archived'].includes(text(selectedContent.status)) && <section className="contentQuickApproval">
-                  <div><span>Platform</span><b>{contentPlatformForItem(selectedContent)}</b></div>
-                  <div><span>Publishes</span><b>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Date not set"}</b></div>
-                  <div><span>Owner</span><b>{contentOwnerDisplay(selectedContent)}</b></div>
-                  <div className="contentQuickActions"><button className="outlineBtn" disabled={reviewSaving} onClick={() => openContentRejection(selectedContent)}>Request changes</button><button className="liveBtn" disabled={reviewSaving || !selectedContent.channel_id} onClick={() => { if (!selectedContent.publish_at) openContent(selectedContent); else void reviewContent(selectedContent, "approved"); }}>{reviewSaving ? "Recording…" : !selectedContent.publish_at ? "Add date to approve" : "Approve content"}</button></div>
-                </section>}
-                <article className={`contentPostMockup ${contentPlatformForItem(selectedContent).toLowerCase()}`}>
-                  <header><span className="feedAvatar">{initials(contentPropertyName(selectedContent))}</span><div><b>{contentPropertyName(selectedContent)}</b><small>{contentAccountName(selectedContent)}</small></div><span>•••</span></header>
-                  {contentPictureUrl(selectedContent) ? (
-                    <figure className="contentCreative">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={contentPictureUrl(selectedContent)} alt={`Creative for ${text(selectedContent.title)}`} />
-                      <figcaption>Original stored creative · secure preview</figcaption>
-                    </figure>
-                  ) : null}
-                  <div className="contentPostSignals" aria-hidden="true"><span>♡</span><span>○</span><span>⌁</span><span>▱</span></div>
-                  <section className="contentPostCaption"><b>{contentAccountName(selectedContent)}</b><p>{text(selectedContent.caption, "No final publishing caption has been documented yet.")}</p></section>
-                  {contentPlatformForItem(selectedContent).toLowerCase() === "instagram" && <div className="contentPostUtilityActions">
-                    <button className="outlineBtn" disabled={!text(selectedContent.caption, "").trim()} onClick={() => void copyContentCaption(selectedContent)}>Copy caption</button>
-                    <button className="liveBtn" disabled={!contentPictureDownloadUrl(selectedContent) || downloadingContentId === String(selectedContent.id)} onClick={() => void downloadContentPicture(selectedContent)}>{downloadingContentId === String(selectedContent.id) ? "Preparing download…" : "Download image"}</button>
-                    {contentUtilityStatus?.contentId === String(selectedContent.id) && <span className={`contentUtilityStatus ${contentUtilityStatus.kind}`} role="status" aria-live="polite">{contentUtilityStatus.message}</span>}
-                  </div>}
-                </article>
-                {Boolean(selectedContent.body) && <section className="previewCopy"><span>Draft / working copy</span><p>{text(selectedContent.body)}</p></section>}
-                {Boolean(selectedContent.brief) && <section className="previewCopy"><span>Brief</span><p>{text(selectedContent.brief)}</p></section>}
+            {drawer === "approval" && selectedApproval && (
+              <div className="approvalDetailDrawer">
+                <LiveLabel>Approval package</LiveLabel>
+                <h2>{text(selectedApproval.title, "Untitled decision")}</h2>
+                <p>{text(selectedApproval.summary, "No summary documented.")}</p>
                 <dl className="contentPreviewFacts">
-                  <div><dt>Publication date</dt><dd>{selectedContent.publish_at ? new Intl.DateTimeFormat("en-US", { dateStyle: "medium", timeStyle: "short", timeZone: "America/New_York" }).format(new Date(String(selectedContent.publish_at))) : "Date not set"}</dd></div>
-                  <div><dt>Platform</dt><dd>{contentPlatformForItem(selectedContent)}</dd></div>
-                  <div><dt>Account</dt><dd>{contentAccountName(selectedContent)}</dd></div>
-                  <div><dt>Owner</dt><dd>{contentOwnerDisplay(selectedContent)}</dd></div>
-                  <div><dt>Distribution</dt><dd>{text(selectedContent.distribution_mode)}</dd></div>
-                  {contentCreativePath(selectedContent) && <div><dt>Post image asset</dt><dd>{contentCreativePath(selectedContent)}</dd></div>}
-                  <div><dt>Publication proof</dt><dd>{selectedContent.screenshot_path ? "Screenshot stored separately" : "Not recorded"}</dd></div>
+                  <div><dt>Status</dt><dd>{statusLabel(text(selectedApproval.status, "pending"))}</dd></div>
+                  <div><dt>Decision due</dt><dd>{dateLabel(selectedApproval.due_at)}</dd></div>
+                  <div><dt>Recommendation</dt><dd>{text(selectedApproval.recommendation, "No recommendation documented.")}</dd></div>
+                  <div><dt>Risk</dt><dd>{text(selectedApproval.risk, "No risk documented.")}</dd></div>
+                  {Boolean(selectedApproval.decision_note) && <div><dt>Decision note</dt><dd>{text(selectedApproval.decision_note)}</dd></div>}
                 </dl>
-                <div className="previewActions">
-                  {Boolean(selectedContent.final_url) && <a className="outlineBtn" href={String(selectedContent.final_url)} target="_blank" rel="noreferrer">Open published post ↗</a>}
-                  <button className="outlineBtn" onClick={() => openContent(selectedContent)}>Edit content</button>
+                <div className="approvalDetailActions">
+                  <button className="liveBtn" onClick={() => void decide(selectedApproval, "approved")}>Approve</button>
+                  <button className="outlineBtn" onClick={() => void decide(selectedApproval, "changes_requested")}>Request changes</button>
+                  <button className="ghostBtn" onClick={() => void decide(selectedApproval, "declined")}>Decline</button>
                 </div>
+                <button className="approvalDelete" onClick={() => void deleteApproval(selectedApproval)}>Delete package</button>
               </div>
             )}
             {drawer === "content" && (
