@@ -5,8 +5,29 @@ import { serializeApiResource } from "../../../../../utils/content-assets";
 import { approveWebsitePublication } from "../../../../../utils/content-automation/approve-publication";
 import { createAutomationClient } from "../../../../../utils/content-automation/server";
 import { normalizeContentWrite } from "../../../../../utils/content-write";
+import { MonthlyContentPlanningReadinessError, requireMonthlyContentPlanningReady } from "../../../../../utils/monthly-content/planning-readiness";
 
 type RouteContext = { params: Promise<{ resource: string; id: string }> };
+
+const machineWritableResources = new Set([
+  "tasks",
+  "content-items",
+  "content-assets",
+  "agent-work-items",
+  "agent-work-dependencies",
+  "content-feedback",
+  "content-research-records",
+  "approvals",
+]);
+
+const machineDeletableResources = new Set([
+  "tasks",
+  "content-items",
+  "content-assets",
+  "agent-work-items",
+  "agent-work-dependencies",
+  "content-feedback",
+]);
 
 export async function GET(request: Request, { params }: RouteContext) {
   const { resource: resourceName, id } = await params;
@@ -32,7 +53,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: ["content-items", "content-assets", "agent-work-items", "agent-work-dependencies", "content-feedback"].includes(resourceName),
+    allowAgentWrite: machineWritableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const body = await readJson(request);
@@ -42,13 +63,23 @@ export async function PATCH(request: Request, { params }: RouteContext) {
   if (resourceName === "content-items") {
     const { data: current, error: currentError } = await context.supabase
       .from(resource.table)
-      .select("caption,creative_asset_path,metadata,status,approval_state,channel_id")
+      .select("caption,creative_asset_path,metadata,status,approval_state,channel_id,owner_agent_id,publish_at,monthly_ops_version")
       .eq("id", id)
       .single();
     if (currentError || !current) return fail(404, "not_found", "The requested record was not found.");
     const normalized = normalizeContentWrite({ ...current, ...payload });
     if (normalized.error) return fail(422, "unhosted_creative", normalized.error);
     payload = { ...payload, caption: normalized.payload.caption };
+    if (body.status === "ready_for_tito" && Number(current.monthly_ops_version || 0) === 2) {
+      try {
+        await requireMonthlyContentPlanningReady(context.supabase, { ...current, ...payload });
+      } catch (failure) {
+        if (failure instanceof MonthlyContentPlanningReadinessError) {
+          return fail(422, failure.code, failure.message, { missing_fields: failure.missingFields });
+        }
+        throw failure;
+      }
+    }
     if (current.status === "approved" && current.approval_state === "approved" && body.publish_at && body.status !== "publishing") {
       payload.status = "scheduled";
     }
@@ -136,7 +167,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
     const contentUpdate =
       body.status === "approved"
         ? {
-            status: body.schedule_content === true ? "scheduled" : "approved",
+            status: "approved",
             approval_state: "approved",
             approved_by: context.user!.id,
             approved_at: new Date().toISOString(),
@@ -149,7 +180,7 @@ export async function PATCH(request: Request, { params }: RouteContext) {
           }
         : body.status === "changes_requested"
           ? {
-              status: "revision_requested",
+              status: "revision_required",
               approval_state: "changes_requested",
               approved_by: null,
               approved_at: null,
@@ -201,7 +232,7 @@ export async function DELETE(request: Request, { params }: RouteContext) {
 
   const context = await requireMember(request, {
     write: true,
-    allowAgentWrite: ["content-items", "content-assets", "agent-work-items", "agent-work-dependencies", "content-feedback"].includes(resourceName),
+    allowAgentWrite: machineDeletableResources.has(resourceName),
   });
   if (isApiError(context)) return context;
   const { data, error } = await context.supabase

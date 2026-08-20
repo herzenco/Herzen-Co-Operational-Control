@@ -30,6 +30,51 @@ test("protects the Operations Control Center behind company login", async () => 
   assert.equal(new URL(response.headers.get("location")).pathname, "/login");
 });
 
+test("protects human work-item pages with the same company login", async () => {
+  const response = await render("/work-items/46a40266-cd0d-48d5-a71a-41b63d88f43d");
+  assert.equal(response.status, 307);
+  assert.equal(new URL(response.headers.get("location")).pathname, "/login");
+});
+
+test("protects stable human ticket deep links with the same company login", async () => {
+  const id = "73aafd5c-7273-42bc-9ba0-cad6444c920b";
+  const response = await render(`/kanban/${id}`);
+  assert.equal(response.status, 307);
+  const location = new URL(response.headers.get("location"));
+  assert.equal(location.pathname, "/login");
+  assert.equal(location.searchParams.get("next"), `/kanban/${id}`);
+});
+
+test("human login preserves only safe same-origin ticket destinations", async () => {
+  const [loginPage, loginRoute, middleware] = await Promise.all([
+    readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../utils/supabase/middleware.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(loginPage, /name="next"/);
+  assert.match(loginRoute, /next\.startsWith\("\/"\).*!next\.startsWith\("\/\/"\)/s);
+  assert.match(middleware, /searchParams\.set\("next"/);
+});
+
+test("ticket detail source uses exact canonical OCC APIs and route-backed stable URLs", async () => {
+  const [dialog, commandCenter, deepLink, legacyLink] = await Promise.all([
+    readFile(new URL("../app/task-detail-dialog.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/command-center.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/kanban/[id]/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/tasks/[id]/page.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(dialog, /\/api\/v1\/tasks\/\$\{encodeURIComponent\(taskId\)\}/);
+  assert.match(dialog, /entity_type=tasks&entity_id=/);
+  assert.match(dialog, /role="status"/);
+  assert.match(dialog, /aria-labelledby="task-detail-title"/);
+  assert.match(commandCenter, /router\.push\(`\/kanban\/\$\{encodeURIComponent\(id\)\}`\)/);
+  assert.match(commandCenter, /router\.push\("\/kanban"\)/);
+  assert.match(dialog, /`\/kanban\/\$\{encodeURIComponent\(taskId\)\}`/);
+  assert.match(deepLink, /<OccPage view="kanban" taskId=\{id\}/);
+  assert.match(legacyLink, /redirect\(`\/kanban\/\$\{encodeURIComponent\(id\)\}`\)/);
+  assert.doesNotMatch(dialog + commandCenter + deepLink + legacyLink, /clickup/i);
+});
+
 test("server-renders the Herzen Co. company login", async () => {
   const response = await render("/login");
   assert.equal(response.status, 200);
@@ -45,18 +90,21 @@ test("server-renders the Herzen Co. company login", async () => {
   assert.doesNotMatch(html, /Continue with ChatGPT|Sign in with ChatGPT/i);
 });
 
-test("keeps the company-domain boundary explicit in source", async () => {
-  const [loginPage, loginRoute, homePage] = await Promise.all([
+test("keeps the company-domain boundary explicit across routed OCC pages", async () => {
+  const [loginPage, loginRoute, homePage, occPage] = await Promise.all([
     readFile(new URL("../app/login/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/api/auth/login/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/occ-page.tsx", import.meta.url), "utf8"),
   ]);
 
   assert.match(loginPage, /@herzenco\.co/);
   assert.match(loginPage, /no\s+public registration/i);
   assert.match(loginRoute, /COMPANY_EMAIL_DOMAIN\s*=\s*"herzenco\.co"/);
   assert.match(loginRoute, /email\.endsWith\(`@\$\{COMPANY_EMAIL_DOMAIN\}`\)/);
-  assert.match(homePage, /redirect\("\/login"\)/);
+  assert.match(homePage, /redirect\("\/command"\)/);
+  assert.match(occPage, /if \(!session\) redirect\(`\/login\?next=/);
+  assert.match(occPage, /<CommandCenter \/>/);
 });
 
 test("renders secure OCC recovery and password reset screens", async () => {

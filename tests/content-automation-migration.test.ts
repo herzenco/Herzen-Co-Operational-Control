@@ -82,12 +82,10 @@ test("OCC publishes websites only and leaves LinkedIn publication to Lupe", () =
   assert.doesNotMatch(linkedinAdapter, /api\.linkedin\.com/);
 });
 
-test("Lupe delivery sends only review titles and URLs through WhatsApp", () => {
-  assert.match(whatsappAdapter, /graph\.facebook\.com/);
-  assert.match(whatsappAdapter, /item\.title/);
-  assert.match(whatsappAdapter, /item\.review_url/);
-  assert.doesNotMatch(whatsappAdapter, /\b(?:caption|asset_url|body): z\./i);
-  assert.match(whatsappAdapter, /whatsapp_not_configured/);
+test("direct OCC-to-WhatsApp delivery is retired", () => {
+  assert.match(whatsappAdapter, /disabledAutomationResult\("whatsapp_delivery"\)/);
+  assert.doesNotMatch(whatsappAdapter, /graph\.facebook\.com/);
+  assert.doesNotMatch(whatsappAdapter, /WHATSAPP_ACCESS_TOKEN/);
 });
 
 test("writer and independent auditor can use Vercel deployment identity", () => {

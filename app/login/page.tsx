@@ -9,9 +9,9 @@ export const metadata: Metadata = {
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ error?: string; recovered?: string }>;
+  searchParams: Promise<{ error?: string; recovered?: string; next?: string }>;
 }) {
-  const { error, recovered } = await searchParams;
+  const { error, recovered, next } = await searchParams;
 
   return (
     <main className="companyLogin">
@@ -45,6 +45,7 @@ export default async function LoginPage({
           {recovered && <div className="loginNotice" role="status">Password updated. Sign in with your new OCC credentials.</div>}
 
           <form action="/api/auth/login" method="post">
+            {next?.startsWith("/") && !next.startsWith("//") && <input type="hidden" name="next" value={next} />}
             <label>
               Company email
               <input

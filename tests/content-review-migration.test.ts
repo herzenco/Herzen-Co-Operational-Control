@@ -14,15 +14,14 @@ test("content opens with properties and no publishing desk", () => {
   assert.doesNotMatch(contentView, /Publishing desk/i);
 });
 
-test("post review approves into schedule and opens a required rejection dialog", () => {
-  assert.match(commandCenter, /Approve & schedule/);
+test("post review records approval without automatic scheduling and opens a required rejection dialog", () => {
   assert.match(commandCenter, /openContentRejection/);
   assert.match(commandCenter, /role="dialog" aria-modal="true"/);
   assert.match(commandCenter, /autoFocus required value=\{rejectionReason\}/);
   assert.match(commandCenter, /decision_note: decisionNote \|\| null/);
-  assert.match(commandCenter, /schedule_content: decision === "approved" && Boolean\(item\.publish_at\)/);
+  assert.match(commandCenter, /schedule_content: false/);
   assert.match(itemRoute, /rejection_reason_required/);
-  assert.match(itemRoute, /status: body\.schedule_content === true \? "scheduled" : "approved"/);
+  assert.match(itemRoute, /status: "approved"/);
   assert.match(resources, /"decision_note"/);
 });
 
@@ -51,7 +50,9 @@ test("rejected feedback section reads immutable approval activity", () => {
   assert.match(commandCenter, /rejectionHistoryFromActivity\(approvalActivity\)/);
   const history = rejectionHistoryFromActivity([{ id: 7, entity_type: "approvals", created_at: "2026-08-01T12:00:00Z", after_data: { id: "approval-1", content_item_id: "content-1", status: "changes_requested", decision_note: "Use less text on the visual.", decided_at: "2026-08-01T11:59:00Z" } }]);
   assert.deepEqual(history, [{ id: "7", approvalId: "approval-1", contentItemId: "content-1", decision: "changes_requested", reason: "Use less text on the visual.", decidedAt: "2026-08-01T11:59:00Z" }]);
-  assert.equal(isContentReviewable("awaiting_tito"), true);
+  assert.equal(isContentReviewable("ready_for_tito"), true);
+  assert.equal(isContentReviewable("ready_for_lupe"), false);
+  assert.equal(isContentReviewable("revision_required"), false);
   assert.equal(isContentReviewable("drafting"), false);
 });
 
@@ -59,4 +60,9 @@ test("desktop preview renders a post mockup with caption and decisions", () => {
   assert.match(commandCenter, /contentPostMockup/);
   assert.match(commandCenter, /contentPostCaption/);
   assert.match(styles, /\.contentPostMockup/);
+});
+
+test("stable review URLs open the exact authenticated content preview", () => {
+  assert.match(commandCenter, /new URLSearchParams\(window\.location\.search\)\.get\("content_item"\)/);
+  assert.match(commandCenter, /setDrawer\("contentPreview"\)/);
 });

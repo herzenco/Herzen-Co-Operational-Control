@@ -29,6 +29,9 @@ export type ResourceName =
   | "automation-schedules"
   | "workflow-runs"
   | "workflow-run-logs"
+  | "monthly-content-stage-jobs"
+  | "monthly-content-transitions"
+  | "monthly-content-revisions"
   | "content-delivery-jobs"
   | "content-publish-jobs"
   | "leads"
@@ -140,6 +143,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
       "research_record_id", "qa_checklist", "qa_passed_at", "approval_packet", "approval_packet_state", "approval_packet_sent_at",
       "paired_content_item_id", "generation_run_id", "target_audience", "conversion_goal", "slug", "seo_title", "meta_description", "reasoning_summary", "source_links", "audit_status", "audit_iteration_count", "seo_score", "aeo_score", "audit_summary", "audit_blockers", "review_ready_at", "review_url", "review_approved_at", "review_approved_by",
+      "monthly_ops_request_id", "monthly_ops_version", "workflow_key", "stage_owner_agent_id", "next_action", "blocker", "blocker_owner_agent_id", "last_meaningful_activity_at", "recovery_count", "human_review_url",
     ],
     updateFields: [
       "title", "brief", "body", "caption", "creative_asset_path", "property_id", "channel_id", "content_type_id",
@@ -153,6 +157,7 @@ export const resources: Record<ResourceName, ResourceConfig> = {
       "linked_paid_media_work_item_id", "delivered_at", "delivered_by_agent_id",
       "research_record_id", "qa_checklist", "qa_passed_at", "approval_packet", "approval_packet_state", "approval_packet_sent_at",
       "paired_content_item_id", "generation_run_id", "target_audience", "conversion_goal", "slug", "seo_title", "meta_description", "reasoning_summary", "source_links", "audit_status", "audit_iteration_count", "seo_score", "aeo_score", "audit_summary", "audit_blockers", "review_ready_at", "review_url", "review_approved_at", "review_approved_by",
+      "monthly_ops_request_id", "monthly_ops_version", "workflow_key", "stage_owner_agent_id", "next_action", "blocker", "blocker_owner_agent_id", "last_meaningful_activity_at", "recovery_count", "human_review_url",
     ],
     filters: [
       "property_id", "channel_id", "content_type_id", "owner_agent_id",
@@ -227,6 +232,9 @@ export const resources: Record<ResourceName, ResourceConfig> = {
   "automation-schedules": { table: "automation_schedules", mutable: true, createFields: ["job_type", "timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], updateFields: ["timezone", "schedule_expression", "next_run_at", "enabled", "configuration"], filters: ["job_type", "enabled"], defaultOrder: "next_run_at" },
   "workflow-runs": { table: "workflow_runs", mutable: false, createFields: [], updateFields: [], filters: ["schedule_id", "generation_run_id", "job_type", "status"], defaultOrder: "created_at" },
   "workflow-run-logs": { table: "workflow_run_logs", mutable: false, createFields: [], updateFields: [], filters: ["run_id", "level", "event"], defaultOrder: "created_at" },
+  "monthly-content-stage-jobs": { table: "monthly_content_stage_jobs", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "request_id", "stage", "owner_agent_id", "status"], defaultOrder: "created_at" },
+  "monthly-content-transitions": { table: "monthly_content_transition_events", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "request_id", "from_status", "to_status", "actor_type"], defaultOrder: "created_at" },
+  "monthly-content-revisions": { table: "monthly_content_revisions", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "job_id", "revision"], defaultOrder: "created_at" },
   "content-delivery-jobs": { table: "content_delivery_jobs", mutable: false, createFields: [], updateFields: [], filters: ["delivery_type", "status"], defaultOrder: "scheduled_for" },
   "content-publish-jobs": { table: "content_publish_jobs", mutable: false, createFields: [], updateFields: [], filters: ["content_item_id", "platform", "status"], defaultOrder: "scheduled_for" },
   "content-status-history": {

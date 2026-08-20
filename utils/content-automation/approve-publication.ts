@@ -18,6 +18,19 @@ export async function approveWebsitePublication(supabase: SupabaseClient, input:
     .single();
   if (itemError || !item) throw itemError || new Error("The content item was not found.");
 
+  // Monthly Content Operations deliberately separates human approval from
+  // scheduling/publishing. Controlled rollout must never create a publish job.
+  if (Number(item.monthly_ops_version || 0) === 2) {
+    const approvedAt = new Date().toISOString();
+    const reviewer = String(input.reviewerName || input.reviewerEmail || "Herzen reviewer").trim();
+    const { error: approvalOnlyError } = await supabase.from("content_items").update({
+      status: "approved", approval_state: "approved", review_approved_at: approvedAt,
+      review_approved_by: reviewer, publication_state: "unpublished",
+    }).eq("id", item.id).eq("status", "ready_for_tito");
+    if (approvalOnlyError) throw approvalOnlyError;
+    return { ok: true, jobId: `approval-only:${item.id}`, payload: { publishing_enabled: false, approved_at: approvedAt } };
+  }
+
   const [channelResult, contentTypeResult, assetResult] = await Promise.all([
     supabase.from("content_channels").select("*").eq("id", item.channel_id).single(),
     item.content_type_id
