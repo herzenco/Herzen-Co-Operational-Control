@@ -105,7 +105,9 @@ async function flagInvalidCandidate(supabase: SupabaseClient, item: Row, errors:
     next_action: nextAction,
   }).eq("id", item.id).eq("status", fromStatus).eq("publication_state", fromPublicationState).eq("approval_state", "approved").select("id").maybeSingle();
   if (error) throw error;
-  if (blocked) await recordTransition(supabase, item, fromStatus, "recovery_required", failure, nextAction);
+  if (blocked && fromStatus !== "recovery_required") {
+    await recordTransition(supabase, item, fromStatus, "recovery_required", failure, nextAction);
+  }
 }
 
 export async function reconcileApprovedHerzencoArticles(supabase: SupabaseClient, now = new Date()) {
@@ -122,7 +124,7 @@ export async function reconcileApprovedHerzencoArticles(supabase: SupabaseClient
   for (const item of (data || []) as Row[]) {
     if (["scheduled", "published"].includes(text(item.status))) continue;
     const errors = validateHerzencoPublicationCandidate(item);
-    if (text(item.status) !== "approved") errors.unshift(`The workflow status must be approved, not ${text(item.status) || "unset"}.`);
+    if (text(item.status) !== "approved") errors.unshift("The workflow must return to approved status before scheduling.");
     if (errors.length) {
       await flagInvalidCandidate(supabase, item, errors);
       results.push({ content_item_id: item.id, action: "blocked", errors });

@@ -110,6 +110,7 @@ test("the production cron schedules, publishes, then dispatches identifier event
   assert.match(lifecycle, /\.eq\("status", "scheduled"\)[\s\S]*\.select\("id"\)\.maybeSingle\(\)/);
   assert.match(lifecycle, /posting_instructions: text\(item\.posting_instructions\) \|\| websitePostingInstructions/);
   assert.match(lifecycle, /status: "recovery_required"[\s\S]*publication_state: "failed"/);
+  assert.match(lifecycle, /blocked && fromStatus !== "recovery_required"/);
   assert.match(middleware, /\/api\/cron\/herzenco-publishing/);
 });
 
