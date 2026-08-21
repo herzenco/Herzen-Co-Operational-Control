@@ -18,7 +18,7 @@ The first nine fields are always present and non-empty. Optional objects/fields 
 
 ## Webhook
 
-OCC sends `POST $HERZENCO_PUBLISH_WEBHOOK_URL` (production value `https://herzenco.co/api/publish`) with `Authorization: Bearer $HERZENCO_PUBLISH_WEBHOOK_SECRET` and JSON:
+OCC sends `POST $HERZENCO_PUBLISH_WEBHOOK_URL` (production value `https://www.herzenco.co/api/publish`) with `Authorization: Bearer $HERZENCO_PUBLISH_WEBHOOK_SECRET` and JSON:
 
 ```json
 {"event_id":"uuid","event":"content.published","property":"herzenco","content_id":"uuid","slug":"example-article","occurred_at":"2026-08-14T14:00:00.000Z"}
@@ -38,7 +38,7 @@ Editorial state commits independently of delivery. An owner/operator can safely 
 
 ## Configuration and deployment
 
-- `HERZENCO_PUBLISH_WEBHOOK_URL=https://herzenco.co/api/publish`
+- `HERZENCO_PUBLISH_WEBHOOK_URL=https://www.herzenco.co/api/publish` (use the direct `www` host; do not rely on the apex redirect for authenticated requests)
 - `HERZENCO_PUBLISH_WEBHOOK_SECRET` — shared server-only website secret
 - `HERZENCO_CONTENT_API_TOKEN` — dedicated server-only pull API token
 - Existing `NEXT_PUBLIC_SUPABASE_URL`, `SUPABASE_SECRET_KEY` (or service-role fallback), and `CRON_SECRET`

@@ -15,7 +15,7 @@ Complete the website half of the OCC-owned article publishing pipeline. OCC is t
 - Supabase security advisors reported no errors.
 - OCC production deployment: `dpl_12cvJRJM6j6sfopQP6udJqgzt8sE`
 - Production alias: `https://operations.herzenco.co`
-- Production webhook destination: `https://herzenco.co/api/publish`
+- Production webhook destination: `https://www.herzenco.co/api/publish`
 - Production `HERZENCO_PUBLISH_WEBHOOK_URL` is configured.
 - Production `HERZENCO_PUBLISH_WEBHOOK_SECRET` is configured as a sensitive Vercel value.
 - Production `HERZENCO_CONTENT_API_TOKEN` is configured as a sensitive Vercel value.
