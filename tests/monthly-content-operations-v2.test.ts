@@ -77,9 +77,11 @@ test("existing-draft adoption is explicit, drafting-only, and preserves authored
   assert.doesNotMatch(adoption, /generateIndependentAsset|title:|body:|caption:|slug:|seo_title:|meta_description:|content_publish_jobs|content_delivery_jobs/);
 });
 
-test("monthly approval cannot create a publishing job", () => {
+test("monthly approval enables the canonical scheduler without creating a legacy publishing job", () => {
   const branch = approval.slice(approval.indexOf("Monthly Content Operations"), approval.indexOf("const [channelResult"));
   assert.match(branch, /status: "approved"/);
   assert.match(branch, /publication_state: "unpublished"/);
+  assert.match(branch, /publishing_enabled: true/);
+  assert.match(branch, /\.select\("id"\)\.maybeSingle\(\)/);
   assert.doesNotMatch(branch, /content_publish_jobs|approve_content_publication/);
 });

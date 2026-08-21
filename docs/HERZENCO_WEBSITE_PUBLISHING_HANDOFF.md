@@ -41,19 +41,9 @@ The token and webhook secret were rotated in memory and written directly to both
 
 All tokens and secrets are server-only. Never prefix them with `NEXT_PUBLIC_`, print them, add them to a tracked `.env` file, or include them in a ticket/chat.
 
-## Remaining website action and current blocker
+## Deployment note
 
-The hook and all other Production variables are configured. Deploy the website workspace and complete end-to-end validation.
-
-The first production deployment attempt (`dpl_7Yg2WzHtRQEdzyyFLimWd5U3BihE`) failed before its build command with:
-
-```text
-No Next.js version detected. Make sure your package.json has "next" in either "dependencies" or "devDependencies".
-```
-
-This is a Vercel framework-detection/configuration problem: the website is an intentionally static project, its project framework is `Other`, and `vercel.json` correctly specifies `npm run build` with output directory `public`. Do not install Next.js to silence this error. Diagnose why the deployment selected the Next.js builder, correct that project/deployment configuration, and retry.
-
-A local `vercel build --prod` reaches the correct static build command, but `vercel env pull` substitutes an unreadable placeholder for sensitive variables, so its OCC pull returns `401`. This does not demonstrate a mismatch between deployed secrets. Validate the real token in a Vercel remote build, where Vercel injects the actual sensitive value.
+The website is intentionally static and uses Vercel's **Other** framework preset with `npm run build` and output directory `public`. Do not install Next.js or change the framework preset. Sensitive Vercel values are intentionally not retrievable with `vercel env pull`; validate the real token through a remote build, where Vercel injects the production value.
 
 ## Deployment order
 

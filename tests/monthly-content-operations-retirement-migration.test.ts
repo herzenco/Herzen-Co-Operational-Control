@@ -60,8 +60,8 @@ test("retirement migration disables every legacy schedule without deleting histo
   for (const jobType of legacyContentAutomationJobTypes) assert.match(migration, new RegExp(`'${jobType}'`));
 });
 
-test("no Vercel cron or direct OCC WhatsApp credentials remain advertised", () => {
-  assert.doesNotMatch(vercelConfig, /"crons"/);
+test("only the canonical website scheduler is advertised and direct OCC WhatsApp remains retired", () => {
+  assert.deepEqual(JSON.parse(vercelConfig).crons, [{ path: "/api/cron/content-automation", schedule: "* * * * *" }]);
   assert.match(envExample, /OCC_MONTHLY_CONTENT_OPERATIONS_ENABLED=false/);
   assert.doesNotMatch(envExample, /^WHATSAPP_ACCESS_TOKEN=/m);
   assert.doesNotMatch(envExample, /^WHATSAPP_PHONE_NUMBER_ID=/m);

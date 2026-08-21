@@ -14,6 +14,7 @@ export async function updateSession(request: NextRequest) {
     request.nextUrl.pathname.startsWith("/api/v1/");
   const isPublicAutomationRoute =
     request.nextUrl.pathname === "/api/cron/content-automation" ||
+    request.nextUrl.pathname === "/api/cron/herzenco-publishing" ||
     request.nextUrl.pathname === "/api/review/content" ||
     request.nextUrl.pathname.startsWith("/review/content/") ||
     request.nextUrl.pathname.startsWith("/api/integrations/");

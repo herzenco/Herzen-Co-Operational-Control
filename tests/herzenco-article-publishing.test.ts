@@ -2,10 +2,16 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import { bearerToken, isPublishedHerzencoBlog, sanitizedWebhookFailure, sendHerzencoWebhook, serializePublishedArticle, shouldRetryWebhook, tokensMatch, validatePublishedArticle, webhookBackoffMs } from "../utils/content-publishing/herzenco";
+import { validateHerzencoPublicationCandidate } from "../utils/content-publishing/lifecycle";
 
 const route = readFileSync("app/api/v1/content/route.ts", "utf8");
 const syncRoute = readFileSync("app/api/v1/content/sync/route.ts", "utf8");
 const dispatcher = readFileSync("utils/content-publishing/dispatcher.ts", "utf8");
+const lifecycle = readFileSync("utils/content-publishing/lifecycle.ts", "utf8");
+const cronRoute = readFileSync("app/api/cron/content-automation/route.ts", "utf8");
+const publishingCronRoute = readFileSync("app/api/cron/herzenco-publishing/route.ts", "utf8");
+const middleware = readFileSync("utils/supabase/middleware.ts", "utf8");
+const vercel = JSON.parse(readFileSync("vercel.json", "utf8"));
 const migration = readFileSync("supabase/migrations/20260814140000_herzenco_article_pull_publishing.sql", "utf8");
 
 const published = {
@@ -39,6 +45,29 @@ test("published content is filtered to the exact Herzen property, website channe
   assert.equal(isPublishedHerzencoBlog({ ...published, channel: { platform: "linkedin" } }), false);
 });
 
+test("publication readiness blocks incomplete approvals but accepts a fully audited article", () => {
+  const candidate = {
+    ...published,
+    status: "approved",
+    approval_state: "approved",
+    publication_state: "unpublished",
+    review_approved_at: "2026-08-14T18:00:00.000Z",
+    publish_at: "2026-09-03T14:00:00.000Z",
+    audit_status: "passed",
+    seo_score: 82,
+    aeo_score: 88,
+  };
+  assert.deepEqual(validateHerzencoPublicationCandidate(candidate), []);
+  const errors = validateHerzencoPublicationCandidate({
+    ...candidate,
+    slug: null,
+    seo_title: null,
+    audit_status: "pending",
+    seo_score: null,
+  });
+  assert.match(errors.join(" "), /slug|SEO title|audit must pass|SEO score/i);
+});
+
 test("public serializer returns required fields and excludes editorial/private data", () => {
   const article = serializePublishedArticle(published);
   assert.deepEqual(validatePublishedArticle(article), []);
@@ -69,6 +98,19 @@ test("transient webhook failures retry with bounded exponential backoff; permane
   assert.equal(shouldRetryWebhook(400), false);
   assert.deepEqual([1, 2, 3, 20].map(webhookBackoffMs), [30_000, 60_000, 120_000, 3_600_000]);
   assert.match(dispatcher, /attempt < event\.max_attempts/);
+  assert.match(dispatcher, /stale_delivery_lease/);
+});
+
+test("the production cron schedules, publishes, then dispatches identifier events without login redirects", () => {
+  assert.deepEqual(vercel.crons, [{ path: "/api/cron/content-automation", schedule: "* * * * *" }]);
+  assert.match(cronRoute, /runHerzencoPublishingCycle/);
+  assert.match(publishingCronRoute, /runHerzencoPublishingCycle/);
+  assert.match(lifecycle, /reconcileApprovedHerzencoArticles[\s\S]*publishDueHerzencoArticles[\s\S]*dispatchHerzencoEvents/);
+  assert.match(lifecycle, /\.eq\("status", "approved"\)[\s\S]*\.select\("id"\)\.maybeSingle\(\)/);
+  assert.match(lifecycle, /\.eq\("status", "scheduled"\)[\s\S]*\.select\("id"\)\.maybeSingle\(\)/);
+  assert.match(lifecycle, /posting_instructions: text\(item\.posting_instructions\) \|\| websitePostingInstructions/);
+  assert.match(lifecycle, /status: "recovery_required"[\s\S]*publication_state: "failed"/);
+  assert.match(middleware, /\/api\/cron\/herzenco-publishing/);
 });
 
 test("webhook payload is identifier-only and failure details are sanitized", async () => {
